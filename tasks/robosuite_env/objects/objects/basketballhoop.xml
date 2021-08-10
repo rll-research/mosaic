@@ -1,0 +1,77 @@
+<mujoco model="basketball">
+    <asset>
+        <texture name="T_bskt" type="cube" file="textures/metal1.png"/>
+
+        <material name="bskt_col" rgba="0.3 0.3 1.0 0" shininess="0" specular="0"/>
+        <material name="bskt_red" rgba=".6 0 0 1" shininess="1" reflectance=".7" specular=".5"/>
+        <material name="bskt_orange" rgba=".7 .35 0 1" shininess="1" reflectance=".7" specular=".5"/>
+        <material name="bskt_black" rgba=".15 .15 .15 1" shininess="1" reflectance=".7" specular=".5"/>
+
+        <material name="bskt_white" rgba=".85 .85 .85 1" shininess="1" reflectance=".7" specular=".5"/>
+        <material name="bskt_metal" texture="T_bskt" shininess="1" reflectance=".7" specular=".5"/>
+        <mesh file="meshes/basketball/backboard.stl" name="backboard" scale="1 1 1"/>
+        <mesh file="meshes/basketball/backboardsquareinner.stl" name="backboardsquareinner" scale="1 1 1"/>
+        <mesh file="meshes/basketball/backboardsquareouter.stl" name="backboardsquareouter" scale="1 1 1"/>
+        <mesh file="meshes/basketball/basketballinner.stl" name="basketballinner" scale="1 1 1"/>
+        <mesh file="meshes/basketball/basketballouter.stl" name="basketballouter" scale="1 1 1"/>
+        <mesh file="meshes/basketball/hoop.stl" name="hoop" scale="1 1 1"/>
+        <mesh file="meshes/basketball/pole.stl" name="pole" scale="1 1 1"/>
+    </asset>
+    <default>
+
+        <default class="basketball_base">
+            <joint armature="0.001" damping="2" limited="true"/>
+            <geom conaffinity="0" contype="0" group="1" type="mesh"/>
+            <position ctrllimited="true" ctrlrange="0 1.57"/>
+            <default class="basketball_viz">
+                <geom condim="4" type="mesh"/>
+            </default>
+            <default class="basketball_col">
+                <geom conaffinity="1" condim="3" contype="1" group="0" material="bskt_col" solimp="0.99 0.99 0.01"
+                      solref="0.01 1"/>
+            </default>
+        </default>
+    </default>
+
+    <worldbody>
+        <body name="basketballhoop">
+            <body name="object">
+                <body name="backboardlink">
+                    <geom class="basketball_base" material="bskt_white" mesh="backboard" pos="0 0 0.29"/>
+                    <geom class="basketball_base" material="bskt_white" mesh="backboardsquareinner" pos="0 -0.002 0.29"/>
+                    <geom class="basketball_base" material="bskt_red" mesh="backboardsquareouter" pos="0 -.001 0.29"/>
+                    <geom class="basketball_base" material="bskt_metal" mesh="pole"/>
+                    <geom class="basketball_col" pos="0 0 0.27" size="0.1 0.01 0.03" type="box" mass=".2"/>
+                    <geom class="basketball_col" pos="0 0 0.118" size="0.007 0.108" type="cylinder" mass=".2"/>
+                    <geom class="basketball_col" pos="0 0 0.005" size="0.013 0.005" type="cylinder" mass=".01"/>
+                    <body name="hooplink" pos="0 -0.083 0.25">
+                        <geom class="basketball_base" material="bskt_red" mesh="hoop" pos="0 0 -0.001"/>
+                        <geom class="basketball_col" pos="0 .06  0" size="0.01 0.014 0.004" type="box"/>
+
+                        <geom class="basketball_col" euler="1.571 0.785 0" pos="0.031 0.032 -0.001" size="0.01 0.016"
+                              type="capsule"/>
+                        <geom class="basketball_col" euler="0 1.57 0" pos="0 0.045 -0.001" size="0.01 0.016"
+                              type="capsule"/>
+                        <geom class="basketball_col" euler="1.57 0 0" pos="0.044 0 -0.001" size="0.01 0.016"
+                              type="capsule"/>
+                        <geom class="basketball_col" euler="1.57 0 0" pos="-0.044 0 -0.001" size="0.01 0.016"
+                              type="capsule"/>
+                        <geom class="basketball_col" euler="0 1.57 0" pos="0 -0.045 -0.001" size="0.01 0.016"
+                              type="capsule"/>
+                        <geom class="basketball_col" euler="1.57 -0.785  0" pos="-0.031 0.032 -0.001" size="0.01 0.016"
+                              type="capsule"/>
+                        <geom class="basketball_col" euler="1.57 0.785 0" pos="-0.031 -0.032 -0.001" size="0.01 0.016"
+                              type="capsule"/>
+                        <geom class="basketball_col" euler="1.57 -0.785 0" pos="0.031 -0.032 -0.001" size="0.01 0.016"
+                              type="capsule"/>
+                        <site name="goal" size="0.01" rgba="1 0 0 1"/>
+
+                    </body>
+                </body>
+            </body>
+            <site rgba="0 0 0 0" size="0.0005" pos="0 0 -0.08" name="bottom_site"/>
+            <site rgba="0 0 0 0" size="0.0005" pos="0 0 0.65" name="top_site"/>
+            <site rgba="0 0 0 0" size="0.0005" pos="0.011 0.09 0" name="horizontal_radius_site"/>
+        </body>
+    </worldbody>
+</mujoco>

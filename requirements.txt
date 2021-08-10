@@ -1,0 +1,9 @@
+gym 
+opencv-python 
+h5py 
+pyquaternion 
+pyyaml 
+matplotlib 
+hydra-core 
+einops 
+numpy==1.20

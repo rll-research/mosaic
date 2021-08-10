@@ -1,0 +1,298 @@
+EXPERT_DATA:    /home/mandi/robosuite
+DATE:           '0521' # latest small images
+# NOTE(0521): DATE='0518' for 90x130 images (only pickplace saved as 150x270); and DATE='0521' for 100x180 (only pickplace saved as 200x360)
+loader_workers: 20 
+save_path:      /home/mandi/mosaic/log_data
+save_freq:      5000
+eval_starts:    50 # count by epochs
+eval_freq:      50
+# eval_task:      ${task.name}
+use_amp:        False # not seeing big improvement from True
+save_optim:     False
+repeat_last:    False
+resume:         False
+resume_path:    None
+device:         -1
+gen_png:        false
+exp_name:       -1
+epochs:         20
+bsize:          30
+vsize:          30 # New(0501): optionally use a smaller batchsize for validation loader
+inv_mul:        1
+bc_mul:         1
+pnt_mul:        0
+log_freq:       5000
+print_freq:     500
+train_cfg:
+  batch_size:           ${bsize}
+  val_size:             ${vsize}
+  lr:                   5e-4
+  epochs:               ${epochs}
+  log_freq:             ${log_freq}
+  inv_loss_mult:        ${inv_mul}
+  bc_loss_mult:         ${bc_mul}
+  pnt_loss_mult:        ${pnt_mul}
+  rep_loss_muls:        ${muls}
+  target_update:        5 # arbitrary a.f. 
+  dataset:              ${dataset_cfg}
+  sampler:              ${samplers}
+
+muls:
+  img_byol:           ${byol.mul_pre}
+  attn_byol:          ${byol.mul_pos}
+  demo_byol:          ${byol.mul_demo}
+  intm_byol:          ${byol.mul_intm}
+  simclr_pre:         ${simclr.mul_pre}
+  simclr_post:        ${simclr.mul_pos}
+  simclr_intm:        ${simclr.mul_intm}
+  img_frame_curl:     0
+  attn_frame_curl:    0
+  img_traj_curl:      0 
+  attn_traj_curl:     0
+  img_atc:            0
+  attn_atc:           0
+
+
+tasks:                  ??? #['${open}','${press}','${draw}','${place}'] 
+use_all_tasks:          False 
+use_four:               False 
+use_hard_three:         False 
+set_same_n:             -1
+limit_num_traj:         -1 
+limit_num_demo:         -1
+weight_loss_by_subtask: False
+mla: False
+multi_layer_actions:    ${mla} # New(0610)
+# NOTE: different data organization than single task!
+dataset_cfg:
+  _target_:         'hem.datasets.multi_task_datasets.MultiTaskPairedDataset'
+  root_dir:         ${EXPERT_DATA}/multi_task
+  mode:             ???
+  tasks_spec:       ${tasks}
+  height:           90
+  width:            130
+  split:            [0.9, 0.1]
+  demo_T:           4
+  obs_T:            7
+  data_augs:        ${augs}
+  non_sequential:   False
+  crop_twice:       True
+  state_spec:       [ee_aa, gripper_qpos]
+  allow_val_skip:   ${val_skip}
+  allow_train_skip: ${train_skip}
+  use_strong_augs:  False
+
+augs:
+  strong_jitter:     0.01   # or 0.4
+  weak_jitter:       0.01
+  grayscale:         0.01   # or 0.1
+  blur:              [0.1, 2.0] # 
+  flip:              0.05   # only flip for the strong augs
+  weak_crop_scale:   [0.8, 1.0]
+  strong_crop_scale: [0.7, 1.0]
+  weak_crop_ratio:   [1.44, 1.44]
+  strong_crop_ratio: [1.44, 1.44]
+  use_affine:        false  
+  rand_trans:        0.1
+
+# NOTE: 'traj_per_subtask' all default 100
+nut_hard:
+  name:             'nut_hard'
+  date:             ${DATE}
+  n_tasks:          9
+  crop:             [0,0,0,0]
+  n_per_task:       1
+  task_ids:         [0,1,2,3,4,5,6,7,8]
+  loss_mul:         1
+  task_per_batch:   9 
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+open:
+  name:             'open'
+  date:             ${DATE}
+  n_tasks:          4
+  crop:             [0,0,0,0]
+  n_per_task:       1
+  task_ids:         [0,1,2,3]
+  loss_mul:         1
+  task_per_batch:   4
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+draw:
+  name:             'draw'
+  date:             ${DATE}
+  n_tasks:          8
+  crop:             [0,0,0,0]   # 100x180 images used [0,20,0,0]
+  n_per_task:       1
+  task_ids:         [0,1,2,3,4,5,6,7]
+  loss_mul:         1
+  task_per_batch:   8
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+press:
+  name:             'press'
+  date:             ${DATE}
+  n_tasks:          6
+  crop:             [0,0,0,0]     # 0420: [40,70,90,90] 0419: [30, 70, 85, 85], 0418: [10,40,45,45] 
+  n_per_task:       1
+  task_ids:         [0,1,2,3,4,5]
+  loss_mul:         1
+  task_per_batch:   6
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+place:
+  name:              'place'
+  date:              ${DATE}
+  n_tasks:           16
+  crop:              [30,70,90,90] #[10,45,40,40]   # 0420: [40,70,90,90] 0419: [30, 70, 85, 85], 0418: [10,40,45,45] 
+  n_per_task:        1
+  task_ids:          [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+  loss_mul:          1
+  task_per_batch:    16
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+stack:  
+  name:             'stack'
+  date:              ${DATE}
+  n_tasks:           6
+  crop:              [0,0,0,0]
+  skip_ids:          [-1]
+  n_per_task:        1
+  task_ids:          [0,1,2,3,4,5]
+  loss_mul:          1
+  task_per_batch:    6
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+bask_hard:
+  name:             'bask_hard'
+  date:             ${DATE}
+  n_tasks:          12
+  crop:             [0,0,0,0] #[10,40,40,40]   # [10, 40, 40, 40] for 0421. but 0,0,0,0 for 0420..
+  n_per_task:       1
+  task_ids:         [0,1,2,3,4,5,6,7,8,9,10,11]
+  loss_mul:         1
+  task_per_batch:   12
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+# New(0521): add color_stack and shape_stack for generalization results 
+color_stack:  
+  name:             'color_stack'
+  date:              ${DATE}
+  n_tasks:           6
+  crop:              [0,0,0,0]
+  skip_ids:          [-1]
+  n_per_task:        1
+  task_ids:          [0,1,2,3,4,5]
+  loss_mul:          1
+  task_per_batch:    6
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+shape_stack:  
+  name:             'shape_stack'
+  date:              ${DATE}
+  n_tasks:           6
+  crop:              [0,0,0,0]
+  skip_ids:          [-1]
+  n_per_task:        1
+  task_ids:          [0,1,2,3,4,5]
+  loss_mul:          1
+  task_per_batch:    6
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+
+samplers:       # NOTE(0504): some args are for MutlTaskSampler, some are for DIY
+  batch_size:         ${bsize}
+  drop_last:          False
+  init_ratio:         'even'
+  shuffle:            True 
+  use_diy:            False
+val_skip:               false # whether to let the samplers skip some **sub**tasks
+train_skip:             true
+
+# New(0502): DIY batch sampling
+# try: taskset -c 35-45 python train_mt_simple.py sampler_spec.use_diy=1 exp_name=burn bsize=32
+# taskset -c 35-45 python train_mt_simple.py sampler_spec.use_diy=1 exp_name=burn bsize=38 tasks=['${place}','${stack}'] batch_spec.stack.n_per_task=2
+freeze_img_encoder:     false
+freeze_attn_layers:      -1
+train_encoder_only:     False
+restart_action_layers:  False
+
+cat_head:             False 
+cat_action:           False
+actions:
+  n_layers:         2   # increase to  2 here
+  out_dim:          64
+  hidden_dim:       128
+  adim:             8
+  n_mixtures:       4  # increase to 4?
+  const_var:        True
+  sep_var:          True 
+  concat_demo_head: ${cat_head}
+  concat_demo_act:  ${cat_action}
+  demo_mean:        ${demo_mean}
+attn:
+  embed_hidden:     256
+  dropout:          0.2
+  n_attn_layers:    2
+  attn_heads:       4
+  attn_ff:          128
+  pos_enc:          True 
+  two_img_encoder:  False
+  fuse_starts:      0   # default 0 so attn everywhere
+  causal:           True
+  use_iter:         False 
+  attend_demo:      True
+  demo_out:         True     
+  img_cfg:          # for image encoder
+    network_flag:   0 # all use res18 now!
+    out_feature:    256
+    drop_dim:       3 #
+    pretrained:     False
+use_byol:             True
+byol_policy:          # NOTE: no spatial embed, network_flag=0
+  _target_:           mosaic.models.mt_rep.VideoImitation # hem.models.atc_tcc.TwoEncoderImitation
+  latent_dim:         40
+  sdim:               9
+  concat_state:       False
+  height:             ${train_cfg.dataset.height}
+  width:              ${train_cfg.dataset.width} # to figure out output dim for ATC encoder
+  demo_T:             ${train_cfg.dataset.demo_T}
+  obs_T:              ${train_cfg.dataset.obs_T}   
+  dim_H:              6
+  dim_W:              9 # very ugly
+  demo_mean:          True 
+  action_cfg:         ${actions}
+  concat_demo_head:   ${cat_head}
+  concat_demo_act:    ${cat_action}
+  attn_cfg:           ${attn}
+  byol_config:        ${byol}
+  simclr_config:      ${simclr}
+    
+simclr:
+  demo_T:           ${train_cfg.dataset.demo_T}
+  obs_T:            ${train_cfg.dataset.obs_T} 
+  mul_pre:          0
+  mul_pos:          0
+  mul_intm:         0  
+  tau:              0.005      
+  compressor_dim:   128
+  temporal:         True
+  hidden_dim:       256
+  share_W:          False 
+  loss_twice:       False
+  fix_step:         -1 
+
+byol: 
+  p:                2
+  project_dim:      128
+  hidden_dim:       256
+  demo_T:           ${train_cfg.dataset.demo_T}
+  obs_T:            ${train_cfg.dataset.obs_T}   
+  demo_proj:        True
+  share_mlp:        True 
+  no_hidden:        False
+  draw_apart:       False
+  mul_pre:          0
+  mul_pos:          0
+  mul_intm:         0 
+  mul_demo:         0

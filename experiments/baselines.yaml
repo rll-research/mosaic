@@ -1,0 +1,259 @@
+#hydra:
+#  run:
+#    dir: /home/fangchen/one_shot_transformers/outputs
+EXPERT_DATA:    /home/mandi/robosuite
+DATE:           '0521' # latest small images
+loader_workers: 20 
+save_path:      /home/mandi/mosaic/baseline_data
+save_freq:      5000
+eval_starts:    50 # count by epochs
+eval_freq:      50
+# eval_task:      ${task.name}
+use_amp:        False # not seeing big improvement from True
+save_optim:     False
+repeat_last:    False
+resume:         False
+resume_path:    None
+device:         -1
+gen_png:        false
+exp_name:       -1
+epochs:         20
+bsize:          30
+vsize:          30 # New(0501): optionally use a smaller batchsize for validation loader
+inv_mul:        1
+bc_mul:         1
+pnt_mul:        0.1
+log_freq:       5000
+print_freq:     500
+train_cfg:
+  batch_size:           ${bsize}
+  val_size:             ${vsize}
+  lr:                   5e-4
+  epochs:               ${epochs}
+  log_freq:             ${log_freq}
+  inv_loss_mult:        ${inv_mul}
+  bc_loss_mult:         ${bc_mul}
+  pnt_loss_mult:        ${pnt_mul}
+  rep_loss_muls:        ${muls}
+  target_update:        5 # arbitrary a.f. 
+  dataset:              ${dataset_cfg}
+  sampler:              ${samplers}
+use_byol: False 
+muls:
+  img_byol:           0
+  attn_byol:          0
+  demo_byol:          0
+  intm_byol:          0
+  simclr_pre:         0
+  simclr_post:        0
+  simclr_intm:        0
+  img_frame_curl:     0
+  attn_frame_curl:    0
+  img_traj_curl:      0 
+  attn_traj_curl:     0
+  img_atc:            0
+  attn_atc:           0
+
+
+tasks:                  ??? #['${open}','${press}','${draw}','${place}'] 
+use_all_tasks:          False 
+use_four:               False 
+use_hard_three:         False 
+set_same_n:             -1 
+limit_num_traj:         -1 
+limit_num_demo:         -1
+# NOTE: different data organization than single task!
+dataset_cfg:
+  _target_:         'hem.datasets.multi_task_datasets.MultiTaskPairedDataset'
+  root_dir:         ${EXPERT_DATA}/multi_task
+  mode:             ???
+  tasks_spec:       ${tasks}
+  height:           90
+  width:            130
+  split:            [0.9, 0.1]
+  demo_T:           4
+  obs_T:            7
+  data_augs:        ${augs}
+  non_sequential:   False
+  crop_twice:       False 
+  state_spec:       [ee_aa, gripper_qpos]
+  allow_val_skip:   ${val_skip}
+  allow_train_skip: ${train_skip}
+  use_strong_augs:  False
+  aux_pose:         True 
+
+augs:
+  strong_jitter:     0.01   # or 0.4
+  weak_jitter:       0.01
+  grayscale:         0.01   # or 0.1
+  blur:              [0.1, 2.0] # 
+  flip:              0.05   # only flip for the strong augs
+  weak_crop_scale:   [0.8, 1.0]
+  strong_crop_scale: [0.7, 1.0]
+  weak_crop_ratio:   [1.44, 1.44]
+  strong_crop_ratio: [1.44, 1.44]
+  use_affine:        false  
+  rand_trans:        0.1
+
+# NOTE: 'traj_per_subtask' all default 100
+nut_hard:
+  name:             'nut_hard'
+  date:             ${DATE}
+  n_tasks:          9
+  crop:             [0,0,0,0]
+  n_per_task:       1
+  task_ids:         [0,1,2,3,4,5,6,7,8]
+  task_per_batch:   9 
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+open:
+  name:             'open'
+  date:             ${DATE}
+  n_tasks:          4
+  crop:             [0,0,0,0]
+  n_per_task:       1
+  task_ids:         [0,1,2,3]
+  task_per_batch:   4
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+draw:
+  name:             'draw'
+  date:             ${DATE}
+  n_tasks:          8
+  crop:             [0,0,0,0]   # 100x180 images used [0,20,0,0]
+  n_per_task:       1
+  task_ids:         [0,1,2,3,4,5,6,7]
+  task_per_batch:   8
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+press:
+  name:             'press'
+  date:             ${DATE}
+  n_tasks:          6
+  crop:             [0,0,0,0]     # 0420: [40,70,90,90] 0419: [30, 70, 85, 85], 0418: [10,40,45,45] 
+  n_per_task:       1
+  task_ids:         [0,1,2,3,4,5]
+  task_per_batch:   6
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+place:
+  name:              'place'
+  date:              ${DATE}
+  n_tasks:           16
+  crop:              [30,70,90,90] #[10,50,70,70] # for 100x180 images used [30,70,90,90]  # 0420: [40,70,90,90] 0419: [30, 70, 85, 85], 0418: [10,40,45,45] 
+  n_per_task:        1
+  task_ids:          [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+  task_per_batch:    16
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+stack:  
+  name:             'stack'
+  date:              ${DATE}
+  n_tasks:           6
+  crop:              [0,0,0,0]
+  skip_ids:          [-1]
+  n_per_task:        1
+  task_ids:          [0,1,2,3,4,5]
+  task_per_batch:    6
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+bask_hard:
+  name:             'bask_hard'
+  date:             ${DATE}
+  n_tasks:          12
+  crop:             [0,0,0,0]   # [10, 40, 40, 40] for 0421. but 0,0,0,0 for 0420..
+  n_per_task:       1
+  task_ids:         [0,1,2,3,4,5,6,7,8,9,10,11]
+  task_per_batch:   12
+  traj_per_subtask:  100
+  demo_per_subtask:  100 
+
+samplers:       # NOTE(0504): some args are for MutlTaskSampler, some are for DIY
+  batch_size:         ${bsize}
+  drop_last:          False
+  init_ratio:         'even'
+  shuffle:            False
+  use_diy:            False
+val_skip:               false # whether to let the samplers skip some **sub**tasks
+train_skip:             true
+
+# New(0502): DIY batch sampling
+# try: taskset -c 35-45 python train_mt_simple.py sampler_spec.use_diy=1 exp_name=burn bsize=32
+# taskset -c 35-45 python train_mt_simple.py sampler_spec.use_diy=1 exp_name=burn bsize=38 tasks=['${place}','${stack}'] batch_spec.stack.n_per_task=2
+freeze_img_encoder:     false
+freeze_attention:       False
+num_freeze_layers:      2
+train_encoder_only:     False
+restart_action_layers:  False
+cat_head: False 
+cat_action: False 
+policy:   ??? # New(0514): set this to unknown and enter from command line 
+
+# the CMU baseline model, dropped dim=3
+cmu:
+  _target_:         mosaic.models.baselines.InverseImitation 
+  latent_dim:       40
+  lstm_config:
+    out_dim:        32
+    n_layers:       1
+    is_rnn:         False
+  vis:
+    conv_drop_dim:  3 # different than original codebase!
+    st_goal_attn:   True
+    n_st_attn:      2
+    use_pe:         True
+    attn_heads:     4
+  n_mixtures:       2
+  const_var:        True
+  concat_state:     False
+  pred_point:       True
+
+use_lstm:           False 
+## LSTM policy: set policy.vis.temp_convs=False 
+lstm:
+  _target_:         mosaic.models.baselines.InverseImitation 
+  latent_dim:       40
+  lstm_config:
+    out_dim:        32
+    n_layers:       1
+    is_rnn:         False
+  vis:
+    temp_convs:     False
+    lstm:           True
+    out_feature:    256
+    context_T:      4
+  n_mixtures:       2
+  const_var:        True
+  concat_state:     False
+  pred_point:       True
+  transformer_feat: False
+ 
+plain:
+  _target_:         mosaic.models.baselines.InverseImitation 
+  latent_dim:       40
+  lstm_config:
+    out_dim:        32
+    n_layers:       1
+    is_rnn:         False
+  vis:
+    temp_convs:     False
+    lstm:           False
+    out_feature:    256
+    context_T:      4
+  n_mixtures:       2
+  const_var:        True
+  concat_state:     False
+  pred_point:       True
+  transformer_feat: False
+
+use_maml:   False
+inner_iters: 1
+maml_policy:
+  _target_: mosaic.models.baselines.DAMLNetwork
+  n_final_convs: 'resnet'
+  T_context: 4
+  maml_lr: 0.1
+  first_order: False
+  n_mix: 2
+  const_var: True
+
