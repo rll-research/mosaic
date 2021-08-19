@@ -25,17 +25,15 @@ from robosuite_env.controllers.expert_button import \
 from robosuite_env.controllers.expert_door import \
     get_expert_trajectory as door_expert 
 from eval_functions import *
-from hem.datasets.util import STD, MEAN, resize, crop, convert_angle_to_quat
-
+ 
 import random
 import copy
 import os
 from os.path import join 
 from collections import defaultdict
 from pyquaternion import Quaternion
-from hem.util import parse_basic_config
 import torch
-from hem.datasets import Trajectory
+from mosaic.datasets import Trajectory
 import numpy as np
 import pickle as pkl
 import imageio
@@ -44,10 +42,9 @@ from torch.multiprocessing import Pool, set_start_method
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import json
+import wandb 
 import cv2
 from collections import OrderedDict 
-
-set_start_method('forkserver', force=True)
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from torchvision import transforms
@@ -58,69 +55,58 @@ from torchvision.transforms import RandomAffine, ToTensor, Normalize, \
     RandomGrayscale, ColorJitter, RandomApply, RandomHorizontalFlip, GaussianBlur, RandomResizedCrop
 import matplotlib.pyplot as plt
 import learn2learn as l2l
+import wandb 
+
+set_start_method('forkserver', force=True)
+
 MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape((3,1,1))
 STD = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape((3,1,1))
 
 TASK_MAP = {
-    'bask': {
-        'n_task':   4, 
+    'basketball': {
+        'num_variations':   12, 
         'env_fn':   basketball_expert,
         'eval_fn':  basketball_eval,
         'agent-teacher': ('PandaBasketball', 'SawyerBasketball'),
-        'render_hw': (100, 180),
+        'render_hw': (100, 180), # new bask_hard is 150 270!
         },
-    'bask_hard': {
-        'n_task':   12, 
-        'env_fn':   basketball_expert,
-        'eval_fn':  basketball_eval,
-        'agent-teacher': ('PandaBasketball', 'SawyerBasketball'),
-        'render_hw': (150, 270), # new bask_hard is 150 270!
-        },
-
-    'nut':  {
-        'n_task':   9, 
+    'nut_assembly':  {
+        'num_variations':   9, 
         'env_fn':   nut_expert,
         'eval_fn':  nut_assembly_eval,
         'agent-teacher': ('PandaNutAssemblyDistractor', 'SawyerNutAssemblyDistractor'),
         'render_hw': (100, 180), 
         },
-    'nut_hard': {
-        'n_task':   9,
-        'env_fn':   nut_expert,
-        'eval_fn':  nut_assembly_eval,
-        'agent-teacher': ('PandaNutAssemblyDistractor', 'SawyerNutAssemblyDistractor'),
-        'render_hw': (150, 270), # (180, 320)??? 0424 harder nut version 
-        },
-    'place': {
-        'n_task':   16, 
+    'pick_place': {
+        'num_variations':   16, 
         'env_fn':   place_expert,
         'eval_fn':  pick_place_eval,
         'agent-teacher': ('PandaPickPlaceDistractor', 'SawyerPickPlaceDistractor'),
         'render_hw': (200, 360), #(150, 270)
         },
-    'stack': {
-        'n_task':   6, 
+    'stack_block': {
+        'num_variations':   6, 
         'env_fn':   stack_expert,
         'eval_fn':  block_stack_eval,
         'agent-teacher': ('PandaBlockStacking', 'SawyerBlockStacking'),
         'render_hw': (100, 180), ## older models used 100x200!!
         },
-    'draw': {
-        'n_task':   8,
+    'drawer': {
+        'num_variations':   8,
         'env_fn':   draw_expert,
         'eval_fn':  draw_eval,
         'agent-teacher': ('PandaDrawer', 'SawyerDrawer'),
-        'render_hw': (120, 180),
+        'render_hw': (100, 180),
     },
-    'press': {
-        'n_task':   6,
+    'button': {
+        'num_variations':   6,
         'env_fn':   press_expert,
         'eval_fn':  press_button_eval,
         'agent-teacher': ('PandaButton', 'SawyerButton'),
         'render_hw': (100, 180),
     },
-    'open': {
-        'n_task':   4,
+    'door': {
+        'num_variations':   4,
         'env_fn':   door_expert,
         'eval_fn':  open_door_eval,
         'agent-teacher': ('PandaDoor', 'SawyerDoor'),
@@ -154,7 +140,6 @@ def build_tvf_formatter(config, env_name='stack'):
     note eval_fn always feeds in traj['obs']['images'], i.e. shape (h,w,3)
     """
     dataset_cfg = config.train_cfg.dataset
-    assert 'multi' in dataset_cfg._target_, 'Got non-multi-task config'+str(dataset_cfg._target_)
     height, width = dataset_cfg.get('height', 100), dataset_cfg.get('width', 180)
     task_spec = config.get(env_name, None)
     # if 'baseline' in config.policy._target_: # yaml for the CMU baseline is messed up
@@ -187,22 +172,6 @@ def build_tvf_formatter(config, env_name='stack'):
         return obs 
     return resize_crop 
 
-def build_formatter(config, env_name='stack'):
-    dataset_cfg = config['dataset'] if 'dataset' in config.keys() else config.train_cfg.dataset
-    height, width = dataset_cfg.get('height', 100), dataset_cfg.get('width', 180)
-
-    def resize_crop(img):
-        crop_params = dataset_cfg.get('crop', (0,0,0,0))
-        if len(crop_params) == 3:
-            crop_params = crop_params[CROP_MAP[env_name]]
-        normalize = dataset_cfg.get('normalize', True) # !!!
-        #print(img.shape, crop_params)
-        cropped = crop(img, crop_params)
-        #print(cropped.shape)
-        return resize(cropped, (height, width), normalize).transpose((2, 0, 1)).astype(np.float32)
-    # print("Evaluate with image size", height, width)
-    return resize_crop
-
 def build_env_context(img_formatter, T_context=4, ctr=0, env_name='nut', 
     heights=100, widths=200, size=False, shape=False, color=False, gpu_id=0, ):
     create_seed = random.Random(None)
@@ -211,26 +180,26 @@ def build_env_context(img_formatter, T_context=4, ctr=0, env_name='nut',
     assert gpu_id != -1
     build_task = TASK_MAP.get(env_name, None)
     assert build_task, 'Got unsupported task '+env_name
-    div = int(build_task['n_task'])
+    div = int(build_task['num_variations'])
     env_fn = build_task['env_fn']
     agent_name, teacher_name = build_task['agent-teacher']
 
-    task = ctr % div
+    variation = ctr % div
     if 'Stack' in teacher_name:
         teacher_expert_rollout = env_fn( teacher_name, \
-            controller_type=controller, task=task, size=size, shape=shape, color=color, \
+            controller_type=controller, task=variation, size=size, shape=shape, color=color, \
             seed=create_seed, heights=heights, widths=widths, gpu_id=gpu_id)
         agent_env = env_fn( agent_name, \
             size=size, shape=shape, color=color, 
-            controller_type=controller, task=task, ret_env=True, seed=create_seed, 
+            controller_type=controller, task=variation, ret_env=True, seed=create_seed, 
              heights=heights, widths=widths, gpu_id=gpu_id)
     else:
         teacher_expert_rollout = env_fn( teacher_name, \
-            controller_type=controller, task=task, \
+            controller_type=controller, task=variation, \
             seed=create_seed, heights=heights, widths=widths, gpu_id=gpu_id)
 
         agent_env = env_fn( agent_name, \
-            controller_type=controller, task=task, ret_env=True, seed=create_seed, 
+            controller_type=controller, task=variation, ret_env=True, seed=create_seed, 
              heights=heights, widths=widths, gpu_id=gpu_id)
     
     assert isinstance(teacher_expert_rollout, Trajectory)
@@ -251,7 +220,7 @@ def build_env_context(img_formatter, T_context=4, ctr=0, env_name='nut',
         # plt.savefig('/home/mandi/osil_dataset/burner.png')
         # raise ValueError
 
-    return agent_env, context, task, teacher_expert_rollout
+    return agent_env, context, variation, teacher_expert_rollout
 
 def rollout_imitation(model, config, ctr, 
     heights=100, widths=200, size=0, shape=0, color=0, max_T=60, env_name='place', gpu_id=-1, baseline=None):
@@ -259,16 +228,14 @@ def rollout_imitation(model, config, ctr,
         gpu_id = int(ctr % torch.cuda.device_count())
     model = model.cuda(gpu_id)
     dataset_tar = config.train_cfg.dataset.get('_target_', None)
-    if dataset_tar and 'multi' in dataset_tar:
-        img_formatter = build_tvf_formatter(config, env_name)
-    else:
-        img_formatter = build_formatter(config, env_name)
+    img_formatter = build_tvf_formatter(config, env_name)
+     
     T_context = config.train_cfg.dataset.get('T_context', None)
     if not T_context:
         assert 'multi' in config.train_cfg.dataset._target_, config.train_cfg.dataset._target_
         T_context = config.train_cfg.dataset.demo_T
     
-    env, context, task_id, expert_traj = build_env_context(
+    env, context, variation_id, expert_traj = build_env_context(
         img_formatter,
         T_context=T_context, ctr=ctr, env_name=env_name, 
         heights=heights, widths=widths, size=size, shape=shape, color=color, gpu_id=gpu_id)
@@ -276,9 +243,9 @@ def rollout_imitation(model, config, ctr,
     build_task = TASK_MAP.get(env_name, None)
     assert build_task, 'Got unsupported task '+env_name
     eval_fn = build_task['eval_fn']
-    traj, tasks = eval_fn(model, env, context, gpu_id, task_id, img_formatter, baseline=baseline)
-    print("Evaluated traj #{}, task#{}, reached? {} picked? {} success? {} ".format(ctr, task_id, tasks['reached'], tasks['picked'], tasks['success']))
-    return traj, tasks, expert_traj
+    traj, info = eval_fn(model, env, context, gpu_id, variation_id, img_formatter, baseline=baseline)
+    print("Evaluated traj #{}, task#{}, reached? {} picked? {} success? {} ".format(ctr, variation_id, info['reached'], info['picked'], info['success']))
+    return traj, info, expert_traj
 
 def _proc(model, config, results_dir, heights, widths, size, shape, color, env_name, baseline, n):
     json_name = results_dir + '/traj{}.json'.format(n)
@@ -287,7 +254,7 @@ def _proc(model, config, results_dir, heights, widths, size, shape, color, env_n
         f = open(json_name)
         task_success_flags = json.load(f)
         print("Using previous results at {}. Loaded eval traj #{}, task#{}, reached? {} picked? {} success? {} ".format( 
-            json_name, n, task_success_flags['task_id'], task_success_flags['reached'], task_success_flags['picked'], task_success_flags['success']))
+            json_name, n, task_success_flags['variation_id'], task_success_flags['reached'], task_success_flags['picked'], task_success_flags['success']))
     else:
         rollout, task_success_flags, expert_traj = rollout_imitation(
             model, config, n, heights, widths, size, shape, color, 
@@ -303,32 +270,32 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('model')
+    parser.add_argument('--wandb_log', action='store_true')
     parser.add_argument('--config', default='')
     parser.add_argument('--N', default=-1, type=int)
-    parser.add_argument('--use_h', default=100, type=int)
-    parser.add_argument('--use_w', default=180, type=int)
+    parser.add_argument('--use_h', default=-1, type=int)
+    parser.add_argument('--use_w', default=-1, type=int)
     parser.add_argument('--num_workers', default=3, type=int)
     parser.add_argument('--size', action='store_true') # for block stacking only!
     parser.add_argument('--shape', action='store_true')
     parser.add_argument('--color', action='store_true')
-    parser.add_argument('--env', '-e', default='', type=str)
-    parser.add_argument('--eval_each_task',  default=3, type=int)
+    parser.add_argument('--env' , '-e', default='door', type=str)
+    parser.add_argument('--eval_each_task',  default=30, type=int)
     parser.add_argument('--eval_subsets',  default=0, type=int)
-    parser.add_argument('--saved_step', '-s', default=20000, type=int)
+    parser.add_argument('--saved_step', '-s', default=1000, type=int)
     parser.add_argument('--baseline', '-bline', default=None, type=str, help='baseline uses more frames at each timestep')
+
 
     args = parser.parse_args()
     try_path = args.model
-    if 'data' not in args.model and 'osil' not in args.model:
+    if 'data' not in args.model and 'mosaic' not in args.model:
         print("Appending dir to given exp_name: ", args.model)
-        try_path = join('/home/mandi/one_shot_transformers/log_data', args.model)
+        try_path = join('/home/mandi/mosaic/log_data', args.model)
         if not os.path.exists(try_path):
-            try_path = join('/shared/mandi/osil', args.model)
+            try_path = join('/shared/mandi/mosaic', args.model)
         if not os.path.exists(try_path):
-            try_path = join('/home/mandi/one_shot_transformers/baseline_data', args.model)
-        if not os.path.exists(try_path):
-            try_path = join('/shared/mandi/bline_osil', args.model)
-            assert os.path.exists(try_path), "Cannot find appending dir anywhere"
+            try_path = join('/home/mandi/mosaic/baseline_data', args.model)
+        assert os.path.exists(try_path), "Cannot find appending dir anywhere"
     if 'model_save' not in args.model:
         print("Appending saved step {}".format(args.saved_step))
         try_path = join(try_path, 'model_save-{}.pt'.format(args.saved_step))
@@ -339,7 +306,7 @@ if __name__ == '__main__':
     assert args.env in TASK_MAP.keys(), "Got unsupported environment {}".format(args.env)
     results_dir = os.path.join(
         os.path.dirname(model_path), 'results_{}/'.format(args.env))
-    if args.env == 'stack':
+    if args.env == 'stack_block':
         if (args.size or args.shape or args.color):
             results_dir = os.path.join( os.path.dirname(model_path), \
                 'results_stack_size{}-shape{}-color-{}'.format(int(args.size), int(args.shape), int(args.color)) )
@@ -355,30 +322,19 @@ if __name__ == '__main__':
     os.makedirs(results_dir, exist_ok=True)
     print("Made new path for results at: %s"%results_dir)
     config_path = os.path.expanduser(args.config) if args.config else os.path.join(os.path.dirname(model_path), 'config.yaml')
-    #config = parse_basic_config(config_path, resolve_env=False)
-    #used_hydra = False
-    #assert '_target_' in config['policy'].keys(),  "assume model saved using hydra configs"
+ 
     config = OmegaConf.load(config_path)
-    if config.train_cfg.dataset.get('agent_dir', None):
-        print("This model was trained on dataset: ", config.train_cfg.dataset.agent_dir)
-        print("During training, the images are cropped with sizes:", config.train_cfg.dataset.crop)
-    else:
-        print('Multi-task dataset, tasks used: ')
-        print( config.tasks )
-        print('Crop params:', [t.crop for t in config.tasks])
-    
-    # check testing the right task!
-    # assert args.env in config.train_cfg.dataset.agent_dir, 'Got env {}'.format(args.env)
-    #     assert args.env[1:] in model_path, model_path
+    print('Multi-task dataset, tasks used: ', config.tasks )
+     
 
     model = hydra.utils.instantiate(config.policy)
     
-    assert torch.cuda.device_count() <= 5, "Let's restrict visible GPUs to not hurt other processes. E.g. export CUDA_VISIBLE_DEVICES=0,1"
+    # assert torch.cuda.device_count() <= 5, "Let's restrict visible GPUs to not hurt other processes. E.g. export CUDA_VISIBLE_DEVICES=0,1"
     build_task = TASK_MAP.get(args.env, None)
     assert build_task, 'Got unsupported task '+args.env
 
     if args.N == -1:
-        args.N = int(args.eval_each_task * build_task.get('n_task', 0))
+        args.N = int(args.eval_each_task * build_task.get('num_variations', 0))
         if args.eval_subsets:
             print("evaluating only first {} subtasks".format(args.eval_subsets))
             args.N = int(args.eval_each_task * args.eval_subsets)
@@ -389,12 +345,15 @@ if __name__ == '__main__':
     #heights, widths = config.train_cfg.dataset.get('height', 100), config.train_cfg.dataset.get('width', 200)
     heights, widths = build_task.get('render_hw', (100, 180))
     if args.use_h != -1 and args.use_w != -1:
-        print("New(0512): smaller default render sizes")
+        print(f"Reset to non-default render sizes {args.use_h}-by-{args.use_w}")
         heights, widths = args.use_h, args.use_w 
-    if args.env == 'place':
+    if args.env == 'pick_place':
         assert args.use_h == 150 or args.use_h == 200, 'PickPlace needs larger rendering'
     print("Renderer is using size {} \n".format((heights, widths)))
+    
+    
     model._2_point = None
+    model._target_embed = None
     if 'mt_rep' in config.policy._target_:
         model.skip_for_eval()
     loaded = torch.load(model_path, map_location=torch.device('cpu'))
@@ -408,12 +367,7 @@ if __name__ == '__main__':
                 allow_unused=True)
     else:
         model.load_state_dict(loaded)
-    model._atc_module = None 
-    model._curl_module = None
-    model._target_embed = None
-    if 'mt_rep' in config.policy._target_:
-        model.skip_for_eval()
-
+ 
     model = model.eval()#.cuda()
     n_success = 0
     size = args.size
@@ -429,18 +383,40 @@ if __name__ == '__main__':
     else:
         task_success_flags = [f(n) for n in range(args.N)]
 
+    if args.wandb_log:
+        model_name = model_path.split("/")[-2]
+        run = wandb.init(project='mosaic', job_type='test', group=model_name)
+        run.name = model_name + f'-Test_{args.env}-Step_{model_saved_step}' 
+
+        wandb.config.update(args)
+        for i, t in enumerate(task_success_flags):
+            wandb.log({
+                'episode': i, 
+                'reached': float(t['reached']),
+                'picked': float(t['picked']),
+                'success': float(t['success']),
+                'variation': int(t['variation_id']),
+            })
+        all_succ_flags = [t['success'] for t in task_success_flags]
+
+        wandb.log({
+            'avg_success': np.mean(all_succ_flags),
+            'success_err': np.mean(all_succ_flags) / np.sqrt(args.N),
+            })
+
+
     final_results = dict()
     for k in ['reached', 'picked', 'success']:
         n_success = sum([t[k] for t in task_success_flags])
-        print('task {}, rate {}'.format(k, n_success / float(args.N)))
+        print('Task {}, rate {}'.format(k, n_success / float(args.N)))
         final_results[k] = n_success / float(args.N)
-    task_ids = defaultdict(list)
+    variation_ids = defaultdict(list)
     for t in task_success_flags:
-        _id = t['task_id']
-        task_ids[_id].append(t['success'])
-    for _id in task_ids.keys():
-        num_eval = len(task_ids[_id])
-        rate = sum(task_ids[_id]) / num_eval 
+        _id = t['variation_id']
+        variation_ids[_id].append(t['success'])
+    for _id in variation_ids.keys():
+        num_eval = len(variation_ids[_id])
+        rate = sum(variation_ids[_id]) / num_eval 
         final_results['task#'+str(_id)] = rate 
         print('Success rate on task#'+str(_id), rate)
 

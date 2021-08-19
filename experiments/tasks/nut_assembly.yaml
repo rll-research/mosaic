@@ -1,0 +1,10 @@
+name:             'nut_hard'
+date:             '0521'
+n_tasks:          9
+crop:             [0,0,0,0]
+n_per_task:       1
+task_ids:         [0,1,2,3,4,5,6,7,8]
+loss_mul:         1
+task_per_batch:   9 
+traj_per_subtask:  100
+demo_per_subtask:  100 

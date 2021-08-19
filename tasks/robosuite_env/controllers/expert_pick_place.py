@@ -5,7 +5,7 @@ if str(Path.cwd()) not in sys.path:
     sys.path.insert(0, str(Path.cwd()))
 import numpy as np
 from robosuite_env import get_env
-from hem.datasets import Trajectory
+from mosaic.datasets import Trajectory
 import pybullet as p
 from pyquaternion import Quaternion
 import random
@@ -16,6 +16,7 @@ from robosuite.utils import RandomizationError
 import torch
 import os
 import mujoco_py
+
 # in case rebuild is needed to use GPU render: sudo mkdir -p /usr/lib/nvidia-000
 # export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/nvidia-000
 # pip uninstall mujoco_py; pip install mujoco_py 

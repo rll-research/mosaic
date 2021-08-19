@@ -6,6 +6,9 @@ from torch import einsum
 import torch.nn.functional as F
 from mosaic.models import get_model
 from mosaic.models.discrete_logistic import DiscreteMixLogistic
+from mosaic.models.rep_modules import BYOLModule, ContrastiveModule
+from mosaic.models.basic_embedding import TemporalPositionalEncoding 
+
 import copy 
 from einops import rearrange, reduce, repeat, parse_shape
 from einops.layers.torch import Rearrange, Reduce
@@ -19,28 +22,6 @@ def make_target(mlp):
         p.requires_grad = False 
     return target
 
-class _TemporalPositionalEncoding(nn.Module):
-    """
-    Modified PositionalEncoding from Pytorch Seq2Seq Documentation
-    source: https://pytorch.org/tutorials/beginner/transformer_tutorial.html
-    """
-    def __init__(self, d_model, dropout=0.1, max_len=2000):
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1) # (max_len, 1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0).transpose(1, 2)
-        self.register_buffer('pe', pe)
-
-    def forward(self, x):
-        assert len(x.shape) >= 3, "x requires at least 3 dims! (B, C, ..)"
-        old_shape = x.shape
-        x = x.reshape((x.shape[0], x.shape[1], -1)) # B,d,T*H*W
-        x = x + self.pe[:,:,:x.shape[-1]]
-        return self.dropout(x).reshape(old_shape)
 
 class _StackedAttnLayers(nn.Module):
     """
@@ -177,150 +158,6 @@ class _StackedAttnLayers(nn.Module):
                     count += np.prod(param.shape)
         return count 
 
-class _ContrastiveModule(nn.Module):
-    """
-    New(0511): add a simplified version of CURL: if k=0 it only does instance-contrast, else, do similar
-    shuffling as in BYOL and contrast against other temporally apart frames within the batch.
-    For simplicity just use one set of MLP for projector and predictor, since the W matrices are kept separate
-    maybe this would be sufficient
-    """
-    def __init__(
-        self,
-        embedder,
-        demo_T,
-        obs_T,
-        img_conv_dim,
-        attn_conv_dim,
-        img_feat_dim,
-        attn_feat_dim,
-        tau=0.01,
-        compressor_dim=128,
-        temporal=False,
-        hidden_dim=0,
-        share_W=False,
-        mul_pre=0,
-        mul_pos=0,
-        mul_intm=0,
-        loss_twice=False,
-        fix_step=-1,
-        ):
-        super().__init__()
-
-        self.frame_compressor = nn.Sequential(
-            Rearrange('B T d H W -> (B T) d H W'),
-            nn.BatchNorm2d(img_conv_dim), nn.ReLU(inplace=True),
-            Rearrange('BT d H W -> BT (d H W)'),
-            nn.Linear(img_feat_dim, compressor_dim),
-            nn.LayerNorm(compressor_dim)
-            )
-        self.predictor = nn.Sequential(
-            nn.ReLU(inplace=True),
-            nn.Linear(compressor_dim, compressor_dim),
-            nn.LayerNorm(compressor_dim)
-            )
-        if hidden_dim:
-            print("Contrastive MLP using hidden dim: ", hidden_dim)
-            self.frame_compressor = nn.Sequential(
-                Rearrange('B T d H W -> (B T) d H W'),
-                nn.BatchNorm2d(img_conv_dim), nn.ReLU(inplace=True),
-                Rearrange('BT d H W -> BT (d H W)'),
-                nn.Linear(img_feat_dim, hidden_dim), nn.ReLU(inplace=True),
-                nn.Linear(hidden_dim, compressor_dim),
-                nn.LayerNorm(compressor_dim)
-                )
-            self.predictor = nn.Sequential(
-                nn.ReLU(inplace=True),
-                nn.Linear(compressor_dim, hidden_dim), nn.ReLU(inplace=True),
-                nn.Linear(hidden_dim, compressor_dim),
-                nn.LayerNorm(compressor_dim)
-                )
-
-        self.frame_compressor_target = make_target(self.frame_compressor)
-        d_f                =   compressor_dim
-        self._pre_attn_W   =   nn.Parameter(torch.rand(d_f, d_f))
-        self._post_attn_W  =   nn.Parameter(torch.rand(d_f, d_f))
-        self.share_W       =   share_W
-        self._intm_attn_W  =   nn.Parameter(torch.rand(d_f, d_f)) # New(0512)
-        self.tau           =   tau
-        self._demo_T       =   demo_T
-        self.temporal      =   temporal
-        self.loss_twice    = loss_twice
-        self.fix_step      = fix_step
-
-    def forward(self, embed_out, embed_out_target):
-        """
-        New(0512): temporal contrastive on outputs everywhere
-        """
-        sim_out = OrderedDict()
-        self.calculate_loss(embed_out, embed_out_target, sim_out, in_key='img_features', out_key='simclr_pre')
-        self.calculate_loss(embed_out, embed_out_target, sim_out, in_key='attn_features', out_key='simclr_post')
-        self.calculate_loss(embed_out, embed_out_target, sim_out, in_key='attn_out_0', out_key='simclr_intm')
-        if self.loss_twice:
-            for (in_key, out_key) in zip(['img_features', 'attn_features', 'attn_out_0'], ['simclr_pre', 'simclr_post', 'simclr_intm']):
-                first_time = sim_out[out_key]
-                self.calculate_loss(embed_out, embed_out_target, sim_out, in_key=in_key, out_key=out_key)
-                new_loss = sim_out[out_key]
-                sim_out[out_key] = first_time + new_loss
-
-        return sim_out
-
-    def calculate_loss(self, embed_out, embed_out_target, sim_out=None, in_key='img_features', out_key='pre'):
-        # if pre_attn:
-        #     img_anc = embed_out['img_features']
-        # else:
-        #     img_anc = embed_out['attn_features']
-        img_anc     = embed_out.get(in_key, None)
-        assert img_anc is not None, 'output is missing: '+str(in_key)
-        compressor  = self.frame_compressor
-        z_a         = compressor(img_anc) # BT, D
-        if self.temporal:
-            z_a     = self.predictor(z_a)
-        # now get target
-        # if pre_attn:
-        #     img_pos = embed_out_target['img_features'] # this should already calculate on aug(imgs)
-        # else:
-        #     img_pos = embed_out_target['attn_features']
-        img_pos     = embed_out_target[in_key]
-        assert img_pos.shape == img_anc.shape
-        if self.temporal:
-            obs_T             = img_pos.shape[1] - self._demo_T
-            tar_demo, tar_obs = img_pos.split([self._demo_T, obs_T], dim=1)
-            if self.fix_step > 0: # eq to ATC
-                k, dT = self.fix_step, self._demo_T
-                assert k <= dT
-                demo_idxs         = list(range(dT))[k:] + list(range(k))
-                obs_idxs          = list(range(obs_T))[k:] + list(range(k))
-            else:
-                demo_idxs         = torch.randperm(self._demo_T)
-                obs_idxs          = torch.randperm(obs_T)
-            img_pos           = torch.cat([tar_demo[:, demo_idxs], tar_obs[:, obs_idxs]], dim=1)
-
-        compressor_tar = self.frame_compressor_target
-        z_pos = compressor_tar(img_pos).detach()
-
-        # compute (B*T,B*T) matrix z_a (W z_pos.T)
-        # - to compute loss use multiclass cross entropy with identity matrix for labels
-        # W_frame = self._pre_attn_W  if pre_attn else self._post_attn_W
-        W_frame = self._pre_attn_W
-        if not self.share_W and 'pos' in out_key:
-            W_frame = self._post_attn_W
-        elif not self.share_W and 'intm' in out_key:
-            W_frame = self._intm_attn_W
-        logits = einsum('ad,dd,bd->ab', z_a, W_frame, z_pos)
-        # assert logits.shape[0] > img_anc.shape[0], logits.shape # B*T > B
-        logits = logits - reduce(logits, 'a b -> a 1', 'max')
-        labels = torch.arange(logits.shape[0]).long().to(logits.get_device())
-
-        sim_out[out_key] = F.cross_entropy(logits, labels, reduction='none')
-
-        return
-
-    def soft_param_update(self):
-        tau = self.tau
-        for param, target_param in zip( self.frame_compressor.parameters(), self.frame_compressor_target.parameters()):
-            target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-        return
-
 class _TransformerFeatures(nn.Module):
     """
     (0427)
@@ -375,7 +212,7 @@ class _TransformerFeatures(nn.Module):
                 causal=causal, n_heads=attn_heads, demo_T=demo_T, fuse_starts=fuse_starts,
             )
 
-        self._pe = _TemporalPositionalEncoding(conv_feature_dim, dropout) if pos_enc else None
+        self._pe = TemporalPositionalEncoding(conv_feature_dim, dropout) if pos_enc else None
         self.demo_out = demo_out
         in_dim = conv_feature_dim * dim_H * dim_W
         print("New(0506): Not using spatial embedding! Linear embedder has higher input dim: {}x{}x{}={} ".format(
@@ -494,7 +331,7 @@ class _DiscreteLogHead(nn.Module):
         return (mu, ln_scale, logit_prob)
 
 class VideoImitation(nn.Module):
-    """ The imitation policy model wrapped as a whole """
+    """ The imitation policy model  """
     def __init__(
         self,
         latent_dim,
@@ -543,11 +380,11 @@ class VideoImitation(nn.Module):
                     img_feat_dim, attn_feat_dim)
         self._demo_T = demo_T
 
-        self._byol = _BYOLModule(
+        self._byol = BYOLModule(
             embedder=self._target_embed,
             img_feat_dim=img_feat_dim, attn_feat_dim=attn_feat_dim,
             img_conv_dim=img_conv_dim, attn_conv_dim=attn_conv_dim, **byol_config)
-        self._simclr = _ContrastiveModule(
+        self._simclr = ContrastiveModule(
             embedder=self._target_embed,
             img_feat_dim=img_feat_dim, attn_feat_dim=attn_feat_dim,
             img_conv_dim=img_conv_dim, attn_conv_dim=attn_conv_dim, **simclr_config)
@@ -562,11 +399,7 @@ class VideoImitation(nn.Module):
 
         # NOTE(Mandi): reduced input dimension size  from previous version! hence maybe try widen/add more action layers
         ac_in_dim = int(latent_dim + float(concat_demo_act) * latent_dim + float(concat_state) * sdim)
-
-        # self.query_task = (task_query_dim > 0)
-        # if task_query_dim:
-        #     self.task_
-        #     ac_in_dim = int(latent_dim + float(concat_demo_act) * task_query_dim + float(concat_state) * sdim)
+        
         if action_cfg.n_layers == 1:
             self._action_module = nn.Sequential(nn.Linear(ac_in_dim, action_cfg.out_dim), nn.ReLU())
             self._inv_model     = nn.Sequential(nn.Linear(2*ac_in_dim, action_cfg.out_dim), nn.ReLU())
@@ -582,9 +415,7 @@ class VideoImitation(nn.Module):
         else:
             raise NotImplementedError
 
-        head_in_dim = int(action_cfg.out_dim + float(concat_demo_head) * latent_dim)
-        # if self.query_task:
-        #     head_in_dim = int(action_cfg.out_dim + float(concat_demo_head) * task_query_dim)
+        head_in_dim = int(action_cfg.out_dim + float(concat_demo_head) * latent_dim) 
         self._action_dist = _DiscreteLogHead(
             in_dim=head_in_dim,
             out_dim=action_cfg.adim,
@@ -600,8 +431,7 @@ class VideoImitation(nn.Module):
 
 
     def get_action(self, embed_out, ret_dist=True):
-        """let's define this separately to better handle multi-head cases,
-        directly modifies out dict to put action outputs inside"""
+        """directly modifies output dict to put action outputs inside"""
         out = dict()
         ## single-head case
         demo_embed, img_embed   = embed_out['demo_embed'], embed_out['img_embed']
@@ -615,9 +445,7 @@ class VideoImitation(nn.Module):
         demo_embed              = repeat(demo_embed, 'B d -> B ob_T d', ob_T=obs_T)
 
         if self.concat_demo_act: # for action model
-            # if self.query_task:
-            #     task_embed      = repeat(embed_out['task_embed'], 'B d -> B ob_T d', ob_T=obs_T)
-            #     ac_in           = torch.cat((img_embed, task_embed), dim=2)
+             
             ac_in                 = torch.cat((img_embed, demo_embed), dim=2)
             ac_in               = F.normalize(ac_in, dim=2)
         ac_in                   = torch.cat((ac_in, states), 2) if self._concat_state else ac_in
@@ -679,7 +507,7 @@ class VideoImitation(nn.Module):
             mu_inv, scale_inv, logit_inv = self._action_dist(inv_pred)
             inv_distribution       = DiscreteMixLogistic(mu_inv, scale_inv, logit_inv)
             inv_prob               = rearrange(- inv_distribution.log_prob(actions), 'B n_mix act_dim -> B (n_mix act_dim)')
-            out['inv_prob_%s'%i] = inv_prob #torch.mean(inv_prob, dim=-1)
+            out['inv_prob_%s'%i]   = inv_prob #torch.mean(inv_prob, dim=-1)
 
         return out
 
@@ -710,9 +538,8 @@ class VideoImitation(nn.Module):
 
         if eval:
             return out # NOTE: early return here to do less computation during test time
-
-        # removed: predict goal
-        # run frozem transformer on augmented images
+ 
+        # run frozen transformer on augmented images
         embed_out_target = self._target_embed(images_cp, context_cp)
 
         byol_out_dict = self._byol(embed_out, embed_out_target)
@@ -786,7 +613,7 @@ class VideoImitation(nn.Module):
         print("Re-intialized a total of %s parameters in action MLP layers" % count)
 
     def skip_for_eval(self):
-        """ Hack here to lighten evaluation"""
+        """ skip module inferences for evaluation"""
         self._byol = None
         self._simclr = None
         self._inv_model = None

@@ -8,7 +8,7 @@ if str(Path.cwd()) not in sys.path:
     sys.path.insert(0, str(Path.cwd()))
 import numpy as np
 from robosuite_env import get_env
-from hem.datasets import Trajectory
+from mosaic.datasets import Trajectory
 import pybullet as p
 from pyquaternion import Quaternion
 import random

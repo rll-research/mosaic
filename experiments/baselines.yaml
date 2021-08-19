@@ -5,7 +5,7 @@ EXPERT_DATA:    /home/mandi/robosuite
 DATE:           '0521' # latest small images
 loader_workers: 20 
 save_path:      /home/mandi/mosaic/baseline_data
-save_freq:      5000
+save_freq:      1000
 eval_starts:    50 # count by epochs
 eval_freq:      50
 # eval_task:      ${task.name}
@@ -23,8 +23,8 @@ vsize:          30 # New(0501): optionally use a smaller batchsize for validatio
 inv_mul:        1
 bc_mul:         1
 pnt_mul:        0.1
-log_freq:       5000
-print_freq:     500
+log_freq:       1000
+print_freq:     1000
 train_cfg:
   batch_size:           ${bsize}
   val_size:             ${vsize}
@@ -35,10 +35,10 @@ train_cfg:
   bc_loss_mult:         ${bc_mul}
   pnt_loss_mult:        ${pnt_mul}
   rep_loss_muls:        ${muls}
-  target_update:        5 # arbitrary a.f. 
+  target_update:        5  
   dataset:              ${dataset_cfg}
   sampler:              ${samplers}
-use_byol: False 
+ 
 muls:
   img_byol:           0
   attn_byol:          0

@@ -14,7 +14,7 @@ from robosuite_env.controllers.expert_button import \
 from robosuite_env.controllers.expert_door import \
     get_expert_trajectory as door_expert
 
-from multiprocessing import Pool, cpu_count
+
 import functools
 import os
 import pickle as pkl
@@ -22,66 +22,64 @@ import json
 import random
 import torch
 from os.path import join 
+from multiprocessing import Pool, cpu_count
 
 # To be crystal clear: each constructed "Environment" is defined by both (task_name, robot_name), e.g. 'PandaBasketball'
 # but each task_name may have differnt sub-task ids: e.g. Basketball-task_00 is throwing the white ball into hoop #1
 TASK_ENV_MAP = {
-    'open':     {
+    'door':     {
         'n_task': 4,
         'env_fn': door_expert,
         'panda':  'PandaDoor',
         'sawyer': 'SawyerDoor',
         },
-    'bask_hard': {
-        'n_task':   12, 
-        'env_fn':   basketball_expert,
-        'panda':    'PandaBasketball',
-        'sawyer':   'SawyerBasketball',
-        },
-    
-    'nut_hard':  {
-        'n_task':   9, 
-        'env_fn':   nut_expert,
-        'panda':    'PandaNutAssemblyDistractor',
-        'sawyer':   'SawyerNutAssemblyDistractor',
-        },
-    
-    'place': {
-        'n_task':   16, 
-        'env_fn':   place_expert,
-        'panda':    'PandaPickPlaceDistractor',
-        'sawyer':   'SawyerPickPlaceDistractor',
-        },
-
-    'stack': {
-        'n_task':   6, 
-        'env_fn':   stack_expert,
-        'panda':    'PandaBlockStacking',
-        'sawyer':   'SawyerBlockStacking',
-        },
-    'color_stack': {
-        'n_task':   6, 
-        'env_fn':   stack_expert,
-        'panda':    'PandaBlockStacking',
-        'sawyer':   'SawyerBlockStacking',
-        },
-    'shape_stack': {
-        'n_task':   6, 
-        'env_fn':   stack_expert,
-        'panda':    'PandaBlockStacking',
-        'sawyer':   'SawyerBlockStacking',
-        },
-    'draw': {
+    'drawer': {
         'n_task':   8, 
         'env_fn':   draw_expert,
         'panda':    'PandaDrawer',
         'sawyer':   'SawyerDrawer',
         },
-    'press': {
+    'basketball': {
+        'n_task':   12, 
+        'env_fn':   basketball_expert,
+        'panda':    'PandaBasketball',
+        'sawyer':   'SawyerBasketball',
+        },
+    'nut_assembly':  {
+        'n_task':   9, 
+        'env_fn':   nut_expert,
+        'panda':    'PandaNutAssemblyDistractor',
+        'sawyer':   'SawyerNutAssemblyDistractor',
+        },
+    'stack_block': {
+        'n_task':   6, 
+        'env_fn':   stack_expert,
+        'panda':    'PandaBlockStacking',
+        'sawyer':   'SawyerBlockStacking',
+        },
+    'pick_place': {
+        'n_task':   16, 
+        'env_fn':   place_expert,
+        'panda':    'PandaPickPlaceDistractor',
+        'sawyer':   'SawyerPickPlaceDistractor',
+        },
+    'button': {
         'n_task':   6, 
         'env_fn':   press_expert,
         'panda':    'PandaButton',
         'sawyer':   'SawyerButton',
+        },
+    'stack_new_color': {
+        'n_task':   6, 
+        'env_fn':   stack_expert,
+        'panda':    'PandaBlockStacking',
+        'sawyer':   'SawyerBlockStacking',
+        },
+    'stack_new_shape': {
+        'n_task':   6, 
+        'env_fn':   stack_expert,
+        'panda':    'PandaBlockStacking',
+        'sawyer':   'SawyerBlockStacking',
         },
 }
     

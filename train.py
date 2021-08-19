@@ -16,16 +16,18 @@ import matplotlib.pyplot as plt
 from multiprocessing import cpu_count
 from torch.utils.data import DataLoader
 from omegaconf import DictConfig, OmegaConf
-from torch.cuda.amp import autocast, GradScaler
+# from torch.cuda.amp import autocast, GradScaler
 from einops.layers.torch import Rearrange, Reduce
 from mosaic.utils.lr_scheduler import build_scheduler
+
 from einops import rearrange, reduce, repeat, parse_shape
 from mosaic.models.discrete_logistic import DiscreteMixLogistic
 from collections import defaultdict, OrderedDict
 from hydra.utils import instantiate
-from mosaic.datasets.multi_task_datasets import BatchMultiTaskSampler, DIYBatchSampler, collate_by_task # need for val. loader
+from mosaic.datasets.multi_task_datasets import \
+    BatchMultiTaskSampler, DIYBatchSampler, collate_by_task # need for val. loader
 from mosaic.datasets import Trajectory
-import torchvision
+# import torchvision
 from torch.utils.data._utils.collate import default_collate
 torch.autograd.set_detect_anomaly(True)
 # for visualization
@@ -43,7 +45,6 @@ class Trainer:
         self._device = torch.device("cuda:{}".format(def_device))
         self._device_list = None 
         self._allow_val_grad = allow_val_grad
-        self.use_amp = self.config.use_amp
         # set of file saving
         assert os.path.exists(self.config.save_path), "Warning! Save path {} doesn't exist".format(self.config.save_path)
         if '/shared' in self.config.save_path:
@@ -63,7 +64,7 @@ class Trainer:
         else:
             append += "-noCat"
         if self.train_cfg.rep_loss_muls.get('simclr_pre', 0) or self.train_cfg.rep_loss_muls.get('simclr_pos', 0) or self.train_cfg.rep_loss_muls.get('simclr_intm', 0):
-            append += "-simclr{}".format(int(self.config.policy.simclr_config.hidden_dim))
+            append += "-simclr{}x{}".format(int(self.config.policy.simclr_config.compressor_dim), int(self.config.policy.simclr_config.hidden_dim))
         self.config.exp_name += append 
 
         save_dir = join(self.config.get('save_path', './'), str(self.config.exp_name))
@@ -97,8 +98,8 @@ class Trainer:
             model_inputs[key] = torch.cat(model_inputs[key], dim=0)
 
         if self.config.gen_png and (not self.generated_png):
-            self.generate_figure(model_inputs['images'], model_inputs['demo'], '/home/{}/one_shot_transformers/burner.png'.format(USER))
-            self.generate_figure(model_inputs['images_cp'], model_inputs['demo_cp'], '/home/{}/one_shot_transformers/burner_aug.png'.format(USER))
+            self.generate_figure(model_inputs['images'], model_inputs['demo'], '/home/{}/mosaic/burner.png'.format(USER))
+            self.generate_figure(model_inputs['images_cp'], model_inputs['demo_cp'], '/home/{}/mosaic/burner_aug.png'.format(USER))
             self.generated_png = True
 
         # model = model.to(device)
@@ -175,8 +176,7 @@ class Trainer:
             
         return tr_print 
 
-    def train(self, model, weights_fn=None, save_fn=None, optim_weights=None):
-        """New(0507): let's merge this function and train_fn for clarity """
+    def train(self, model, weights_fn=None, save_fn=None, optim_weights=None): 
         self._train_loader, self._val_loader = self._make_data_loaders(self.train_cfg)
         # wrap model in DataParallel if needed and transfer to correct device
         print('Training stage \n Found {} GPU devices \n'.format(self.device_count))
@@ -194,8 +194,6 @@ class Trainer:
         vlm_alpha           = self.train_cfg.get('vlm_alpha', 0.6)
         log_freq            = self.train_cfg.get('log_freq', 1000)
         print_freq          = self.train_cfg.get('print_freq', 100)
-        self._img_log_freq  = img_log_freq = self.train_cfg.get('img_log_freq', 10000)
-        assert img_log_freq % log_freq == 0, "log_freq must divide img_log_freq!"
         save_freq           = self.config.get('save_freq', 10000)
 
         print("Loss multipliers: \n BC: {} inv: {} Point: {}".format(
@@ -209,7 +207,7 @@ class Trainer:
         sum_mul             = sum( [task.get('loss_mul', 1) for task in self.tasks] )
         task_loss_muls      = { task.name: 
             float("{:3f}".format(task.get('loss_mul', 1) / sum_mul)) for task in self.tasks }
-        print("New(0511): Weighting each task loss separately:", task_loss_muls)
+        print("Weighting each task loss separately:", task_loss_muls)
         self.generated_png  = False
         self._step          = 0
         val_iter            = iter(self._val_loader)
@@ -218,12 +216,11 @@ class Trainer:
         raw_train_stats     = OrderedDict({ task.name: dict({"step": []}) for task in self.tasks })
         vl_running_means    = OrderedDict({ task.name: 0 for task in self.tasks } )
         for e in range(epochs):
-            frac = e / epochs 
-            if self.config.use_byol:
-                mod = model.module if isinstance(model, nn.DataParallel) else model 
-                mod.momentum_update(frac)
+            frac = e / epochs  
+            mod = model.module if isinstance(model, nn.DataParallel) else model 
+            mod.momentum_update(frac)
             
-            for inputs in self._train_loader:
+            for inputs in self. _train_loader:
                 optimizer.zero_grad()
                 ## calculate loss here:
                 task_losses = self.calculate_task_loss(model, inputs)
@@ -251,14 +248,11 @@ class Trainer:
                         vl_running_means[name] = stats["l_bc"][-1] * vlm_alpha + vl_running_means[name] * (1 - vlm_alpha)
 
                     # add learning rate parameter to log
-                    lrs = np.mean([p['lr'] for p in optimizer.param_groups])
-                    # self._writer.add_scalar('lr', lrs, self._step)
-                    # flush to disk and print self._writer.file_writer.flush()
+                    lrs = np.mean([p['lr'] for p in optimizer.param_groups]) 
                     print('Training epoch {1}/{2}, step {0}: \t '.format(self._step, e, epochs))
                     print(train_print)
                     print('Validation step {}:'.format(self._step))
                     print(val_print)
-
                     
                 elif self._step % print_freq == 0:
                     running = ""
@@ -389,11 +383,7 @@ class Trainer:
         if self._step is None:
             raise Exception("Optimization has not begun!")
         return self._step
-
-    @property
-    def is_img_log_step(self):
-        return self._step % self._img_log_freq == 0
-    
+ 
     def generate_figure(self, images, context, fname='burner.png'):
         _B, T_im, _, _H, _W = images.shape 
         T_con = context.shape[1]
@@ -431,7 +421,7 @@ class Workspace(object):
                 rpath = join('/shared/{}/mosaic'.format(USER), cfg.resume_path)
             if not os.path.exists(rpath): # on undergrad servers
                 rpath = join('/home/{}/mosaic'.format(USER), cfg.resume_path)
- )
+ 
             assert os.path.exists(rpath), "Can't seem to find {} anywhere".format(cfg.resume_path)
             print('load model checkpoint AND model config from: %s' % rpath)
             #print(rpath.replace(config.resume_path.split('/')[-1], 'config.yaml'))
@@ -463,7 +453,6 @@ class Workspace(object):
         
         os.makedirs(self.trainer.save_dir, exist_ok=('burn' in self.trainer.save_dir))
         os.makedirs(join(self.trainer.save_dir, 'stats'), exist_ok=True)
-        self.trainer._writer = SummaryWriter(log_dir=join(self.trainer.save_dir, 'log'))
         save_config = copy.deepcopy(self.trainer.config)
         OmegaConf.save(config=save_config, f=join(self.trainer.save_dir, 'config.yaml'))
         
@@ -490,35 +479,13 @@ class Workspace(object):
     config_path="experiments", 
     config_name="multi_task_configs.yaml")
 def main(cfg):
-    from train_grads import Workspace as W
-    if cfg.DATE == '0521':
-        print("Warning(0521), resetting a bunch of configurations for 100x180 images in 0521 dataset:")
-        cfg.dataset_cfg.height = 100 
-        cfg.dataset_cfg.width = 180  
-        cfg.augs.weak_crop_ratio=[1.8,1.8]  
-        cfg.augs.strong_crop_ratio=[1.8,1.8]  
-        cfg.augs.weak_crop_scale=[0.7,1.0] 
-        cfg.augs.strong_crop_scale=[0.6,1.0] 
-        cfg.byol_policy.dim_H = 7 
-        cfg.byol_policy.dim_W = 12 
-        cfg.place.crop      =  [30,70,90,90]
-    if cfg.use_single:
-        print("New(0430): use previous single-task model for MT-dataset")
-        cfg.policy = copy.deepcopy(cfg.single_policy)
-    if cfg.use_byol:
-        print("New(0506): switching to using the BYOL-supported policy and using stronger augs")
-        cfg.policy = copy.deepcopy(cfg.byol_policy)
-        cfg.train_cfg.dataset.use_strong_augs = True 
+    from train import Workspace as W
+ 
     if cfg.use_all_tasks:
-        print("New(0508): loading setting all 7 tasks to the dataset! using byol? {} obs_T: {} demo_T: {}".format(\
-            cfg.use_byol, cfg.dataset_cfg.obs_T, cfg.dataset_cfg.demo_T))
-        cfg.tasks = [cfg.nut_hard, cfg.open, cfg.draw, cfg.press, cfg.place, cfg.stack, cfg.bask_hard]
-    if cfg.use_four:
-        print("New(0511): setting to use four easy tasks combo")
-        cfg.tasks = [cfg.open, cfg.draw, cfg.press, cfg.place]
-    if cfg.use_hard_three:
-        print("New(0511): harder three tasks combo")
-        cfg.tasks = [cfg.nut_hard, cfg.stack, cfg.bask_hard]
+        print("New(0508): loading setting all 7 tasks to the dataset!  obs_T: {} demo_T: {}".format(\
+            cfg.dataset_cfg.obs_T, cfg.dataset_cfg.demo_T))
+        cfg.tasks = [cfg.nut_assembly, cfg.door, cfg.drawer, cfg.button, cfg.pick_place, cfg.stack_block, cfg.basketball]
+     
     if cfg.set_same_n > -1:
         print('New(0514): setting n_per_task of all tasks to ', cfg.set_same_n)
         for tsk in cfg.tasks:

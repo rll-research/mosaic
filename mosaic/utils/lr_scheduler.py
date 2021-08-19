@@ -1,4 +1,5 @@
-import torch 
+import torch
+
 
 def build_scheduler(optimizer, config):
     lr_schedule = config.pop('type', None)

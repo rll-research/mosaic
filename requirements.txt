@@ -7,3 +7,10 @@ matplotlib
 hydra-core 
 einops 
 numpy==1.20
+# ??
+imageio 
+Cython 
+wandb 
+pycparser
+scipy 
+learn2learn

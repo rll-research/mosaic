@@ -10,9 +10,8 @@ import copy
 import os
 from collections import defaultdict, deque
 from pyquaternion import Quaternion
-from hem.util import parse_basic_config
 import torch
-from hem.datasets import Trajectory
+from mosaic.datasets import Trajectory
 import numpy as np
 import pickle as pkl
 
@@ -39,7 +38,7 @@ def get_action(model, states, images, context, gpu_id, n_steps, max_T=80, baseli
     action[-1] = 1 if action[-1] > 0 and n_steps < max_T - 1 else -1
     return action 
 
-def startup_env(model, env, context, gpu_id, task_id, baseline=None):
+def startup_env(model, env, context, gpu_id, variation_id, baseline=None):
     done, states, images = False, [], []
     if baseline is None:
         states = deque(states, maxlen=1)
@@ -54,12 +53,12 @@ def startup_env(model, env, context, gpu_id, task_id, baseline=None):
             pass
     traj = Trajectory()
     traj.append(obs)
-    tasks = {'success': False, 'reached': False, 'picked': False, 'task_id': task_id}
+    tasks = {'success': False, 'reached': False, 'picked': False, 'variation_id': variation_id}
     return done, states, images, context, obs, traj, tasks
 
-def nut_assembly_eval(model, env, context, gpu_id, task_id, img_formatter, max_T=85, baseline=False):
+def nut_assembly_eval(model, env, context, gpu_id, variation_id, img_formatter, max_T=85, baseline=False):
     done, states, images, context, obs, traj, tasks = \
-        startup_env(model, env, context, gpu_id, task_id, baseline=baseline)
+        startup_env(model, env, context, gpu_id, variation_id, baseline=baseline)
     
     object_name = env.nuts[env.nut_id].name
     if env.nut_id == 0:
@@ -92,12 +91,12 @@ def nut_assembly_eval(model, env, context, gpu_id, task_id, img_formatter, max_T
     del states
     del images
     del model
-    #print("Done evaluating traj #{}, task#{}, success? {} ".format(ctr, task_id, tasks['success']))
+    #print("Done evaluating traj #{}, task#{}, success? {} ".format(ctr, variation_id, tasks['success']))
     return traj, tasks
 
-def basketball_eval(model, env, context, gpu_id, task_id, img_formatter, max_T=85, baseline=False):
+def basketball_eval(model, env, context, gpu_id, variation_id, img_formatter, max_T=85, baseline=False):
     done, states, images, context, obs, traj, tasks = \
-        startup_env(model, env, context, gpu_id, task_id, baseline=baseline)
+        startup_env(model, env, context, gpu_id, variation_id, baseline=baseline)
 
     obj_delta_key = 'gripper_to_target_obj'
     obj_key = 'target_obj_pos'
@@ -127,9 +126,9 @@ def basketball_eval(model, env, context, gpu_id, task_id, img_formatter, max_T=8
     
     return traj, tasks
 
-def block_stack_eval(model, env, context, gpu_id, task_id, img_formatter, max_T=85, baseline=False):
+def block_stack_eval(model, env, context, gpu_id, variation_id, img_formatter, max_T=85, baseline=False):
     done, states, images, context, obs, traj, tasks = \
-        startup_env(model, env, context, gpu_id, task_id, baseline=baseline)
+        startup_env(model, env, context, gpu_id, variation_id, baseline=baseline)
     n_steps = 0
     obj_loc = env.sim.data.body_xpos[env.cubeA_body_id]
     obj_key = 'cubeA_pos'
@@ -160,9 +159,9 @@ def block_stack_eval(model, env, context, gpu_id, task_id, img_formatter, max_T=
     return traj, tasks
 
 
-def press_button_eval(model, env, context, gpu_id, task_id, img_formatter, max_T=85, baseline=False):
+def press_button_eval(model, env, context, gpu_id, variation_id, img_formatter, max_T=85, baseline=False):
     done, states, images, context, obs, traj, tasks = \
-        startup_env(model, env, context, gpu_id, task_id, baseline=baseline)
+        startup_env(model, env, context, gpu_id, variation_id, baseline=baseline)
     n_steps = 0
     
     button_loc = np.array(env.sim.data.site_xpos[env.target_button_id])
@@ -197,9 +196,9 @@ def press_button_eval(model, env, context, gpu_id, task_id, img_formatter, max_T
     
     return traj, tasks
 
-def pick_place_eval(model, env, context, gpu_id, task_id, img_formatter, max_T=85, baseline=False):
+def pick_place_eval(model, env, context, gpu_id, variation_id, img_formatter, max_T=85, baseline=False):
     done, states, images, context, obs, traj, tasks = \
-        startup_env(model, env, context, gpu_id, task_id, baseline=baseline)
+        startup_env(model, env, context, gpu_id, variation_id, baseline=baseline)
     n_steps = 0
     
     object_name = env.objects[env.object_id].name
@@ -232,9 +231,9 @@ def pick_place_eval(model, env, context, gpu_id, task_id, img_formatter, max_T=8
     
     return traj, tasks
 
-def draw_eval(model, env, context, gpu_id, task_id, img_formatter, max_T=85, baseline=False):
+def draw_eval(model, env, context, gpu_id, variation_id, img_formatter, max_T=85, baseline=False):
     done, states, images, context, obs, traj, tasks = \
-        startup_env(model, env, context, gpu_id, task_id, baseline=baseline)
+        startup_env(model, env, context, gpu_id, variation_id, baseline=baseline)
     n_steps = 0
     handle_loc = np.array(env.sim.data.body_xpos[env.target_handle_body_id])
     
@@ -263,9 +262,9 @@ def draw_eval(model, env, context, gpu_id, task_id, img_formatter, max_T=85, bas
     del model
     return traj, tasks
 
-def open_door_eval(model, env, context, gpu_id, task_id, img_formatter, max_T=85, baseline=False):
+def open_door_eval(model, env, context, gpu_id, variation_id, img_formatter, max_T=85, baseline=False):
     done, states, images, context, obs, traj, tasks = \
-        startup_env(model, env, context, gpu_id, task_id, baseline=baseline)
+        startup_env(model, env, context, gpu_id, variation_id, baseline=baseline)
     n_steps = 0
     handle_loc = np.array(env.sim.data.site_xpos[env.door_handle_site_id])
     dist = 0.016

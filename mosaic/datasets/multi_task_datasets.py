@@ -3,7 +3,7 @@ import os
 import json
 import torch
 from os.path import join, expanduser
-from moaic.datasets import load_traj, split_files
+from mosaic.datasets import load_traj, split_files
 
 from torch.utils.data import Dataset, Sampler, DataLoader, SubsetRandomSampler, RandomSampler
 from torch.utils.data._utils.collate import default_collate
@@ -16,6 +16,7 @@ from torchvision.transforms.functional import resized_crop
 import pickle as pkl
 from collections import defaultdict, OrderedDict 
 import glob 
+import numpy as np 
 import matplotlib.pyplot as plt
 MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape((1,3,1,1))
 STD = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape((1,3,1,1))
@@ -38,7 +39,7 @@ class MultiTaskPairedDataset(Dataset):
     def __init__(
         self,
         tasks_spec,
-        root_dir='/home/mandi/robosuite/multi_task',
+        root_dir='mosaic_multitask_dataset',
         mode='train',
         split=[0.9, 0.1],
         demo_T=4,
@@ -99,11 +100,15 @@ class MultiTaskPairedDataset(Dataset):
         self.subtask_to_idx = OrderedDict()
         for spec in tasks_spec:
             name, date      = spec.get('name', None), spec.get('date', None)
-            assert (name and date), 'need to specify which day the data was generated, for easier tracking'
+            assert name, 'need to specify the task name for data generated, for easier tracking'
             if mode == 'train':
                 print("Loading task [{:<9}] saved on date {}".format(name, date))
-            agent_dir       = join(root_dir, name, '{}_panda_{}'.format(date, name))
-            demo_dir        = join(root_dir, name, '{}_sawyer_{}'.format(date, name))
+            if date is None:
+                agent_dir       = join(root_dir, name, 'panda_{}'.format(name))
+                demo_dir        = join(root_dir, name, 'sawyer_{}'.format(name))
+            else:
+                agent_dir       = join(root_dir, name, '{}_panda_{}'.format(date, name))
+                demo_dir        = join(root_dir, name, '{}_sawyer_{}'.format(date, name))
             self.subtask_to_idx[name] = defaultdict(list)
             for _id in range(spec.get('n_tasks')):
                 if _id in spec.get('skip_ids', []):
@@ -113,7 +118,7 @@ class MultiTaskPairedDataset(Dataset):
                 task_id     = 'task_{:02d}'.format(_id)
                 task_dir    = expanduser(join(agent_dir,  task_id, '*.pkl'))
                 agent_files = sorted(glob.glob(task_dir))
-                assert len(agent_files) != 0, "Can't find dataset for task {}, subtask {}".format(name, _id)
+                assert len(agent_files) != 0, "Can't find dataset for task {}, subtask {} in dir {}".format(name, _id, task_dir)
                 subtask_size = spec.get('traj_per_subtask', 100)
                 assert len(agent_files) >= subtask_size, "Doesn't have enough data "+str(len(agent_files))
                 agent_files = agent_files[:subtask_size]
