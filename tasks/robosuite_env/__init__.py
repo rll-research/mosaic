@@ -1,10 +1,10 @@
 def get_env(env_name, ranges, **kwargs):
     if env_name == 'SawyerPickPlaceDistractor':
-        from robosuite_env.tasks.pick_place import SawyerPickPlaceDistractor
-        env = SawyerPickPlaceDistractor
+        from robosuite_env.tasks.new_pp import SawyerPickPlace
+        env = SawyerPickPlace
     elif env_name == 'PandaPickPlaceDistractor':
-        from robosuite_env.tasks.pick_place import PandaPickPlaceDistractor
-        env = PandaPickPlaceDistractor
+        from robosuite_env.tasks.new_pp import PandaPickPlace
+        env = PandaPickPlace
     elif env_name == 'PandaNutAssemblyDistractor':
         from robosuite_env.tasks.nut_assembly import PandaNutAssemblyDistractor
         env = PandaNutAssemblyDistractor

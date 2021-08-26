@@ -80,6 +80,7 @@ class BoundarySampler(UniformRandomSampler):
             assert obj.name not in placed_objects, "Object '{}' has already been sampled!".format(obj.name)
 
             horizontal_radius = obj.horizontal_radius
+            #print(horizontal_radius)
             bottom_offset = obj.bottom_offset
             success = False
             for i in range(5000):  # 5000 retries

@@ -1,4 +1,5 @@
 from robosuite.environments.manipulation.pick_place import PickPlace as DefaultPickPlace
+from robosuite.environments.manipulation.single_arm_env import SingleArmEnv
 import sys
 from pathlib import Path
 
@@ -6,7 +7,7 @@ if str(Path.cwd()) not in sys.path:
     sys.path.insert(0, str(Path.cwd()))
 import numpy as np
 from robosuite_env.objects.custom_xml_objects import *
-from robosuite_env.arena import BinsArena
+from robosuite_env.arena import TableArena, BinsArena
 from robosuite.models.objects import (
     MilkVisualObject,
     BreadVisualObject,
@@ -19,19 +20,214 @@ from robosuite.utils.placement_samplers import SequentialCompositeSampler, Unifo
 import robosuite.utils.transform_utils as T
 
 
-class PickPlace(DefaultPickPlace):
-    def __init__(self, robots, randomize_goal=False, single_object_mode=0, default_bin=3, no_clear=False, force_success=False,
-                 use_novel_objects=False, num_objects=4, **kwargs):
-        self._randomize_goal = randomize_goal
+class PickPlace(SingleArmEnv):
+    def __init__(
+            self,
+            robots,
+            default_bin=3,
+            env_configuration="default",
+            controller_configs=None,
+            gripper_types="default",
+            initialization_noise="default",
+            table_full_size=(0.8, 0.8, 0.05),
+            table_friction=(1, 0.005, 0.0001),
+            use_camera_obs=True,
+            use_object_obs=True,
+            reward_scale=1.0,
+            reward_shaping=False,
+            single_object_mode=0,
+            object_type=None,
+            has_renderer=False,
+            has_offscreen_renderer=True,
+            render_camera="frontview",
+            render_collision_mesh=False,
+            render_visual_mesh=True,
+            render_gpu_device_id=-1,
+            control_freq=20,
+            horizon=1000,
+            ignore_done=False,
+            hard_reset=True,
+            camera_names="agentview",
+            camera_heights=256,
+            camera_widths=256,
+            camera_depths=False,
+            no_clear=False,
+    ):
+        # task settings
+        self.single_object_mode = single_object_mode
+        self.object_to_id = {"milk": 0, "bread": 1, "cereal": 2, "can": 3}
+        self.obj_names = ["Milk", "Bread", "Cereal", "Can"]
+        if object_type is not None:
+            assert (
+                    object_type in self.object_to_id.keys()
+            ), "invalid @object_type argument - choose one of {}".format(
+                list(self.object_to_id.keys())
+            )
+            self.object_id = self.object_to_id[
+                object_type
+            ]  # use for convenient indexing
+        self.obj_to_use = None
+
+        # settings for table top
+        self.table_full_size = table_full_size
+        self.table_friction = table_friction
+        self.table_offset = np.array((0, 0, 0.82))
+
+        # reward configuration
+        self.reward_scale = reward_scale
+        self.reward_shaping = reward_shaping
+
+        # whether to use ground-truth object states
+        self.use_object_obs = use_object_obs
         self._no_clear = no_clear
         self._default_bin = default_bin
-        self._force_success = force_success
-        self._was_closed = False
-        self._use_novel_objects = use_novel_objects
-        self._num_objects = num_objects
-        if randomize_goal:
-            assert single_object_mode == 2, "only works with single_object_mode==2!"
-        super().__init__(robots=robots, single_object_mode=single_object_mode, initialization_noise=None, **kwargs)
+        # object placement initializer
+        self.placement_initializer = placement_initializer
+
+        super().__init__(
+            robots=robots,
+            env_configuration=env_configuration,
+            controller_configs=controller_configs,
+            mount_types="default",
+            gripper_types=gripper_types,
+            initialization_noise=initialization_noise,
+            use_camera_obs=use_camera_obs,
+            has_renderer=has_renderer,
+            has_offscreen_renderer=has_offscreen_renderer,
+            render_camera=render_camera,
+            render_collision_mesh=render_collision_mesh,
+            render_visual_mesh=render_visual_mesh,
+            render_gpu_device_id=render_gpu_device_id,
+            control_freq=control_freq,
+            horizon=horizon,
+            ignore_done=ignore_done,
+            hard_reset=hard_reset,
+            camera_names=camera_names,
+            camera_heights=camera_heights,
+            camera_widths=camera_widths,
+            camera_depths=camera_depths,
+        )
+
+    def not_in_bin(self, obj_pos, bin_id):
+
+        bin_x_low = self.bin2_pos[0]
+        bin_y_low = self.bin2_pos[1]
+        if bin_id == 0 or bin_id == 2:
+            bin_x_low -= self.bin_size[0] / 2
+        if bin_id < 2:
+            bin_y_low -= self.bin_size[1] / 2
+
+        bin_x_high = bin_x_low + self.bin_size[0] / 2
+        bin_y_high = bin_y_low + self.bin_size[1] / 2
+
+        res = True
+        if (
+                bin_x_low < obj_pos[0] < bin_x_high
+                and bin_y_low < obj_pos[1] < bin_y_high
+                and self.bin2_pos[2] < obj_pos[2] < self.bin2_pos[2] + 0.1
+        ):
+            res = False
+        return res
+
+    def _get_reference(self):
+        """
+        Sets up references to important components. A reference is typically an
+        index or a list of indices that point to the corresponding elements
+        in a flatten array, which is how MuJoCo stores physical simulation data.
+        """
+        super()._get_reference()
+
+        # Additional object references from this env
+        self.obj_body_id = {}
+        self.obj_geom_id = {}
+
+        # object-specific ids
+        for obj in (self.visual_objects + self.objects):
+            self.obj_body_id[obj.name] = self.sim.model.body_name2id(obj.root_body)
+            self.obj_geom_id[obj.name] = [self.sim.model.geom_name2id(g) for g in obj.contact_geoms]
+
+        # keep track of which objects are in their corresponding bins
+        self.objects_in_bins = np.zeros(len(self.objects))
+
+        # target locations in bin for each object type
+        self.target_bin_placements = np.zeros((len(self.objects), 3))
+        for i, obj in enumerate(self.objects):
+            bin_id = i
+            bin_x_low = self.bin2_pos[0]
+            bin_y_low = self.bin2_pos[1]
+            if bin_id == 0 or bin_id == 2:
+                bin_x_low -= self.bin_size[0] / 2.
+            if bin_id < 2:
+                bin_y_low -= self.bin_size[1] / 2.
+            bin_x_low += self.bin_size[0] / 4.
+            bin_y_low += self.bin_size[1] / 4.
+            self.target_bin_placements[i, :] = [bin_x_low, bin_y_low, self.bin2_pos[2]]
+
+        if self.single_object_mode == 2:
+            self.target_bin_placements = self.target_bin_placements[self._bin_mappings]
+
+    def _reset_internal(self):
+        """
+        Resets simulation internal configurations.
+        """
+        super()._reset_internal()
+
+        # Reset all object positions using initializer sampler if we're not directly loading from an xml
+        if not self.deterministic_reset:
+
+            # Sample from the placement initializer for all objects
+            object_placements = self.placement_initializer.sample()
+
+            # Loop through all objects and reset their positions
+            for obj_pos, obj_quat, obj in object_placements.values():
+                # Set the visual object body locations
+                if "visual" in obj.name.lower():
+                    self.sim.model.body_pos[self.obj_body_id[obj.name]] = obj_pos
+                    self.sim.model.body_quat[self.obj_body_id[obj.name]] = obj_quat
+                else:
+                    # Set the collision object joints
+                    self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
+
+        # Move objects out of the scene depending on the mode
+        obj_names = {obj.name for obj in self.objects}
+        if self.single_object_mode == 1:
+            self.obj_to_use = random.choice(list(obj_names))
+        elif self.single_object_mode == 2:
+            self.obj_to_use = self.objects[self.object_id].name
+        if self.single_object_mode in {1, 2}:
+            obj_names.remove(self.obj_to_use)
+            if not self._no_clear:
+                self.clear_objects(list(obj_names))
+        if self.single_object_mode == 2:
+            self._bin_mappings = np.arange(4)
+            self._bin_mappings[:] = self._default_bin
+
+    def _check_success(self):
+        """
+        Check if all objects have been successfully placed in their corresponding bins.
+        Returns:
+            bool: True if all objects are placed correctly
+        """
+        # remember objects that are in the correct bins
+        gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
+        for i, obj in enumerate(self.objects):
+            obj_str = obj.name
+            obj_pos = self.sim.data.body_xpos[self.obj_body_id[obj_str]]
+            dist = np.linalg.norm(gripper_site_pos - obj_pos)
+            r_reach = 1 - np.tanh(10.0 * dist)
+            self.objects_in_bins[i] = int((not self.not_in_bin(obj_pos, i)) and r_reach < 0.6)
+
+        if self.single_object_mode == 2:
+            obj_str = self.objects[self.object_id].name
+            obj_pos = self.sim.data.body_xpos[self.obj_body_id[obj_str]]
+            return not self.not_in_bin(obj_pos, self._bin_mappings[self.object_id])
+
+        # returns True if a single object is in the correct bin
+        if self.single_object_mode == 1:
+            return np.sum(self.objects_in_bins) > 0
+
+        # returns True if all objects are in correct bins
+        return np.sum(self.objects_in_bins) == len(self.objects)
 
     def _get_placement_initializer(self):
         """
@@ -39,23 +235,19 @@ class PickPlace(DefaultPickPlace):
         """
         self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
 
-        # can sample anywhere in bin
-        bin_x_half = self.model.mujoco_arena.table_full_size[0] / 2 - 0.04
-        bin_y_half = self.model.mujoco_arena.table_full_size[1] / 2 - 0.05
-
-        # each object should just be sampled in the bounds of the bin (with some tolerance)
         self.placement_initializer.append_sampler(
-            sampler=UniformRandomSampler(
+            BoundarySampler(
                 name="CollisionObjectSampler",
                 mujoco_objects=self.objects,
-                x_range=[-bin_x_half, bin_x_half],
-                y_range=[-bin_y_half, bin_y_half],
-                rotation=[0, np.pi / 4],
+                x_range=[-0.13, 0.20],
+                y_range=[-0.30, 0.30],
+                rotation=[0, np.pi/4],
                 rotation_axis='z',
                 ensure_object_boundary_in_range=True,
                 ensure_valid_placement=True,
-                reference_pos=self.bin1_pos,
-                z_offset=0.,
+                reference_pos=self.table_offset,
+                z_offset=0.02,
+                addtional_dist=0.01,
             )
         )
 
@@ -63,24 +255,22 @@ class PickPlace(DefaultPickPlace):
         """
         Loads an xml model, puts it in self.model
         """
-        SingleArmEnv._load_model(self)
+        super()._load_model()
 
         # Adjust base pose accordingly
-        xpos = self.robots[0].robot_model.base_xpos_offset["bins"]
+        xpos = self.robots[0].robot_model.base_xpos_offset["table"](self.table_full_size[0])
         self.robots[0].robot_model.set_base_xpos(xpos)
 
         # load model for table top workspace
-        mujoco_arena = BinsArena(
-            bin1_pos=self.bin1_pos,
+        mujoco_arena = TableArena(
             table_full_size=self.table_full_size,
-            table_friction=self.table_friction
+            table_offset=self.table_offset,
         )
-
         # Arena always gets set to zero origin
         mujoco_arena.set_origin([0, 0, 0])
 
         # store some arena attributes
-        self.bin_size = mujoco_arena.table_full_size
+        self.table_size = mujoco_arena.table_full_size
 
         self.objects = []
         self.visual_objects = []
@@ -92,18 +282,10 @@ class PickPlace(DefaultPickPlace):
             vis_obj = vis_obj_cls(name=vis_name)
             self.visual_objects.append(vis_obj)
 
-        randomized_object_list = [[MilkObject, MilkObject2, MilkObject3], [BreadObject, BreadObject2, BreadObject3],
-                                  [CerealObject, CerealObject2, CerealObject3], [CanObject, CanObject2, CanObject3]]
 
-        if self._use_novel_objects:
-            idx = np.random.randint(0, 3, 4)
-            object_seq = (
-            randomized_object_list[0][idx[0]], randomized_object_list[1][idx[1]], randomized_object_list[2][idx[2]],
-            randomized_object_list[3][idx[3]])
-        else:
-            object_seq = (MilkObject, BreadObject, CerealObject, CanObject)
+        object_seq = (MilkObject, BreadObject, CerealObject, CanObject)
 
-        object_seq = object_seq[:self._num_objects]
+        object_seq = object_seq
 
         for obj_cls, obj_name in zip(
                 object_seq,
@@ -126,41 +308,9 @@ class PickPlace(DefaultPickPlace):
         # Generate placement initializer
         self._get_placement_initializer()
 
-    def clear_objects(self, obj):
-        if self._no_clear:
-            return
-        super().clear_objects(obj)
-
-    def _get_reference(self):
-        super()._get_reference()
-        if self.single_object_mode == 2:
-            self.target_bin_placements = self.target_bin_placements[self._bin_mappings]
-
-    def _reset_internal(self):
-        self._was_closed = False
-        if self.single_object_mode == 2:
-            # randomly target bins if in single_object_mode==2
-            self._bin_mappings = np.arange(self._num_objects)
-            if self._randomize_goal:
-                np.random.shuffle(self._bin_mappings)
-            else:
-                self._bin_mappings[:] = self._default_bin
-        super()._reset_internal()
 
     def reward(self, action=None):
-        if self.single_object_mode == 2:
-            return float(self._check_success())
-        return super().reward(action)
-
-    def _check_success(self):
-        """
-        Returns True if task has been completed.
-        """
-        if self.single_object_mode == 2:
-            obj_str = self.objects[self.object_id].name
-            obj_pos = self.sim.data.body_xpos[self.obj_body_id[obj_str]]
-            return not self.not_in_bin(obj_pos, self._bin_mappings[self.object_id])
-        return super()._check_success()
+        return float(self._check_success())
 
     def _get_observation(self):
         """
@@ -236,12 +386,12 @@ class SawyerPickPlaceDistractor(PickPlace):
     A new object is sampled on every reset.
     """
 
-    def __init__(self, force_object=None, randomize_goal=True, **kwargs):
+    def __init__(self, force_object=None, **kwargs):
         assert "single_object_mode" not in kwargs, "invalid set of arguments"
         items = ['milk', 'bread', 'cereal', 'can']
         obj = np.random.choice(items) if force_object is None else force_object
         obj = items[obj] if isinstance(obj, int) else obj
-        super().__init__(robots=['Sawyer'], single_object_mode=2, object_type=obj, no_clear=True, randomize_goal=randomize_goal, **kwargs)
+        super().__init__(robots=['Sawyer'], single_object_mode=2, object_type=obj, no_clear=True, **kwargs)
 
 
 class PandaPickPlaceDistractor(PickPlace):
@@ -250,12 +400,12 @@ class PandaPickPlaceDistractor(PickPlace):
     A new object is sampled on every reset.
     """
 
-    def __init__(self, force_object=None, randomize_goal=True, **kwargs):
+    def __init__(self, force_object=None, **kwargs):
         assert "single_object_mode" not in kwargs, "invalid set of arguments"
         items = ['milk', 'bread', 'cereal', 'can']
         obj = np.random.choice(items) if force_object is None else force_object
         obj = items[obj] if isinstance(obj, int) else obj
-        super().__init__(robots=['Panda'], single_object_mode=2, object_type=obj, no_clear=True, randomize_goal=randomize_goal, **kwargs)
+        super().__init__(robots=['Panda'], single_object_mode=2, object_type=obj, no_clear=True,  **kwargs)
 
 
 
@@ -265,7 +415,7 @@ if __name__ == '__main__':
     controller = load_controller_config(default_controller="IK_POSE")
     env = SawyerPickPlaceDistractor(has_renderer=True, controller_configs=controller, has_offscreen_renderer=False,
                                     reward_shaping=False,
-                                    use_camera_obs=False, camera_heights=320, camera_widths=320, use_novel_objects=True)
+                                    use_camera_obs=False, camera_heights=320, camera_widths=320)
     env.reset()
     for i in range(10000):
         if i % 200 == 0:
