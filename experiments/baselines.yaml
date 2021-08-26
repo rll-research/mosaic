@@ -16,20 +16,23 @@ resume_path:    None
 device:         -1
 gen_png:        false
 exp_name:       -1
-epochs:         20
+epochs:         10
 bsize:          30
 vsize:          30 # New(0501): optionally use a smaller batchsize for validation loader
 inv_mul:        1
 bc_mul:         1
 pnt_mul:        0.1
-log_freq:       1000
+log_freq:       500
+val_freq:       1000
 print_freq:     1000
+use_byol:       False 
 train_cfg:
   batch_size:           ${bsize}
   val_size:             ${vsize}
   lr:                   5e-4
   epochs:               ${epochs}
   log_freq:             ${log_freq}
+  val_freq:             ${val_freq}
   inv_loss_mult:        ${inv_mul}
   bc_loss_mult:         ${bc_mul}
   pnt_loss_mult:        ${pnt_mul}
@@ -46,40 +49,35 @@ muls:
   simclr_pre:         0
   simclr_post:        0
   simclr_intm:        0
-  img_frame_curl:     0
-  attn_frame_curl:    0
-  img_traj_curl:      0 
-  attn_traj_curl:     0
-  img_atc:            0
-  attn_atc:           0
-
 
 tasks:                  ??? #['${open}','${press}','${draw}','${place}'] 
 use_all_tasks:          False 
 use_four:               False 
 use_hard_three:         False 
+single_task:            ???
 set_same_n:             -1 
 limit_num_traj:         -1 
 limit_num_demo:         -1
-# NOTE: different data organization than single task!
+weight_loss_by_subtask: False
+
 dataset_cfg:
-  _target_:         'hem.datasets.multi_task_datasets.MultiTaskPairedDataset'
-  root_dir:         ${EXPERT_DATA}/multi_task
+  _target_:         'mosaic.datasets.multi_task_datasets.MultiTaskPairedDataset'
+  aux_pose:         True 
+  root_dir:         ${EXPERT_DATA}/
   mode:             ???
   tasks_spec:       ${tasks}
-  height:           90
-  width:            130
+  height:           100
+  width:            180
   split:            [0.9, 0.1]
   demo_T:           4
   obs_T:            7
   data_augs:        ${augs}
   non_sequential:   False
-  crop_twice:       False 
+  crop_twice:       True
   state_spec:       [ee_aa, gripper_qpos]
   allow_val_skip:   ${val_skip}
   allow_train_skip: ${train_skip}
-  use_strong_augs:  False
-  aux_pose:         True 
+  use_strong_augs:  True  
 
 augs:
   strong_jitter:     0.01   # or 0.4
@@ -87,82 +85,99 @@ augs:
   grayscale:         0.01   # or 0.1
   blur:              [0.1, 2.0] # 
   flip:              0.05   # only flip for the strong augs
-  weak_crop_scale:   [0.8, 1.0]
-  strong_crop_scale: [0.7, 1.0]
-  weak_crop_ratio:   [1.44, 1.44]
-  strong_crop_ratio: [1.44, 1.44]
+  weak_crop_scale:   [0.7,1.0] 
+  strong_crop_scale: [0.6,1.0] 
+  weak_crop_ratio:   [1.8, 1.8]
+  strong_crop_ratio: [1.8, 1.8]
   use_affine:        false  
   rand_trans:        0.1
 
 # NOTE: 'traj_per_subtask' all default 100
-nut_hard:
-  name:             'nut_hard'
-  date:             ${DATE}
+nut_assembly:
+  name:             'nut_assembly' 
   n_tasks:          9
   crop:             [0,0,0,0]
   n_per_task:       1
   task_ids:         [0,1,2,3,4,5,6,7,8]
+  loss_mul:         1
   task_per_batch:   9 
   traj_per_subtask:  100
   demo_per_subtask:  100 
-open:
-  name:             'open'
-  date:             ${DATE}
+ 
+door: 
+  name:             'door' 
   n_tasks:          4
   crop:             [0,0,0,0]
   n_per_task:       1
   task_ids:         [0,1,2,3]
+  loss_mul:         1
   task_per_batch:   4
   traj_per_subtask:  100
-  demo_per_subtask:  100 
-draw:
-  name:             'draw'
-  date:             ${DATE}
+  demo_per_subtask:  100
+
+drawer:
+  name:             'drawer' 
   n_tasks:          8
   crop:             [0,0,0,0]   # 100x180 images used [0,20,0,0]
   n_per_task:       1
   task_ids:         [0,1,2,3,4,5,6,7]
+  loss_mul:         1
   task_per_batch:   8
   traj_per_subtask:  100
   demo_per_subtask:  100 
-press:
-  name:             'press'
-  date:             ${DATE}
+
+button:
+  name:             'button'
   n_tasks:          6
   crop:             [0,0,0,0]     # 0420: [40,70,90,90] 0419: [30, 70, 85, 85], 0418: [10,40,45,45] 
   n_per_task:       1
   task_ids:         [0,1,2,3,4,5]
+  loss_mul:         1
   task_per_batch:   6
   traj_per_subtask:  100
   demo_per_subtask:  100 
-place:
-  name:              'place'
-  date:              ${DATE}
+
+pick_place:
+  name:              'pick_place'
   n_tasks:           16
-  crop:              [30,70,90,90] #[10,50,70,70] # for 100x180 images used [30,70,90,90]  # 0420: [40,70,90,90] 0419: [30, 70, 85, 85], 0418: [10,40,45,45] 
+  crop:              [30,70,90,90]  
   n_per_task:        1
   task_ids:          [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+  loss_mul:          1
   task_per_batch:    16
   traj_per_subtask:  100
   demo_per_subtask:  100 
-stack:  
-  name:             'stack'
-  date:              ${DATE}
+
+new_pick_place:
+  name:              'new_pick_place'
+  n_tasks:           16
+  crop:              [0,0,0,0]  
+  n_per_task:        1
+  task_ids:          [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+  loss_mul:          1
+  task_per_batch:    16
+  traj_per_subtask:  100
+  demo_per_subtask:  100
+
+stack_block:  
+  name:             'stack_block'
   n_tasks:           6
   crop:              [0,0,0,0]
   skip_ids:          [-1]
   n_per_task:        1
   task_ids:          [0,1,2,3,4,5]
+  loss_mul:          1
   task_per_batch:    6
   traj_per_subtask:  100
   demo_per_subtask:  100 
-bask_hard:
-  name:             'bask_hard'
-  date:             ${DATE}
+
+basketball:
+  name:             'basketball'
   n_tasks:          12
-  crop:             [0,0,0,0]   # [10, 40, 40, 40] for 0421. but 0,0,0,0 for 0420..
+  crop:             [0,0,0,0] #[10,40,40,40]   # [10, 40, 40, 40] for 0421. but 0,0,0,0 for 0420..
   n_per_task:       1
   task_ids:         [0,1,2,3,4,5,6,7,8,9,10,11]
+  loss_mul:         1
   task_per_batch:   12
   traj_per_subtask:  100
   demo_per_subtask:  100 
@@ -188,8 +203,8 @@ cat_head: False
 cat_action: False 
 policy:   ??? # New(0514): set this to unknown and enter from command line 
 
-# the CMU baseline model, dropped dim=3
-cmu:
+# dropped dim=3
+tosil:
   _target_:         mosaic.models.baselines.InverseImitation 
   latent_dim:       40
   lstm_config:

@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mosaic.models import get_model
-from mosaic.models.basic_embeddings import NonLocalLayer, TemporalPositionalEncoding, TempConvLayer
+from mosaic.models.basic_embedding import NonLocalLayer, TemporalPositionalEncoding, TempConvLayer
 from torchvision import models
 from mosaic.models.discrete_logistic import DiscreteMixLogistic
 import numpy as np

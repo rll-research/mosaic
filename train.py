@@ -135,7 +135,7 @@ class Trainer:
             all_losses["l_inv"]    = self.train_cfg.inv_loss_mult * torch.mean(inv_prob, dim=-1)
         
         # stats = {'inverse_loss': l_inv.item(), 'bc_loss': l_bc.item() }
-        # NOTE(Mandi): the model should just output calculated rep-learning loss
+        # NOTE: the model should just output calculated rep-learning loss
         rep_loss               = torch.zeros_like(all_losses["l_bc"])
         for k, v in out.items():
             if k in self.train_cfg.rep_loss_muls.keys():

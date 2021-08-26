@@ -12,7 +12,7 @@ import numpy as np
 import torch.nn as nn
 from os.path import join
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from multiprocessing import cpu_count
 from torch.utils.data import DataLoader
 from omegaconf import DictConfig, OmegaConf
@@ -123,8 +123,7 @@ class Trainer:
             self.generated_png = True
         all_losses = dict()
         if self.config.use_maml:
-            bc_loss, aux_loss = self.calculate_maml_loss(model, model_inputs)
-
+            bc_loss, aux_loss = self.calculate_maml_loss(model, model_inputs) 
             all_losses["l_bc"] = bc_loss
             all_losses["l_aux"] = aux_loss
             all_losses["loss_sum"] = bc_loss + aux_loss
@@ -132,7 +131,8 @@ class Trainer:
             out = model(
                 images=model_inputs['images'],
                 context=model_inputs['demo'],
-                states=model_inputs['states'], ret_dist=False)
+                states=model_inputs['states'], 
+                ret_dist=False)
             # forward & backward action pred
             actions =  model_inputs['actions']
             mu_bc, scale_bc, logit_bc = out['bc_distrib'] # mu_bc.shape: B, 7, 8, 4]) but actions.shape: B, 6, 8
@@ -153,42 +153,48 @@ class Trainer:
 
                 all_losses["point_loss"] = l_point
 
-            # NOTE(Mandi): the model should just output calculated rep-learning loss
+            # NOTE: the model should just output calculated rep-learning loss
             rep_loss               = torch.zeros_like(all_losses["l_bc"] )
-            # for k, v in out.items():
-            #     if k in self.train_cfg.rep_loss_muls.keys():
-            #         v              = torch.mean(v, dim=-1) # just return size (B,) here
-            #         v              = v * self.train_cfg.rep_loss_muls.get(k, 0)
-            #         all_losses[k]  = v
-            #         rep_loss       = rep_loss + v
+            for k, v in out.items():
+                if k in self.train_cfg.rep_loss_muls.keys():
+                    v              = torch.mean(v, dim=-1) # just return size (B,) here
+                    v              = v * self.train_cfg.rep_loss_muls.get(k, 0)
+                    all_losses[k]  = v
+                    rep_loss       = rep_loss + v
             all_losses["rep_loss"] = rep_loss
             all_losses["loss_sum"] = all_losses["l_bc"] + all_losses["l_inv"] + rep_loss
 
+        # flatten here to avoid headache
         for (task_name, idxs) in task_to_idx.items():
             for (loss_name, loss_val) in all_losses.items():
                 if len(loss_val.shape) > 0:
                     task_losses[task_name][loss_name] = torch.mean(loss_val[idxs])
         return task_losses
 
-    def collect_stats(self, task_losses, raw_stats, running_means=None):
-        for name, stats in task_losses.items():
-            # expects: {'button': {"loss_sum": 1, "l_bc": 1}}
-            assert name in raw_stats.keys(), 'Got unexpected task name ' + str(name)
-            for k, v in stats.items():
-                # if isinstance(v, torch.Tensor):
-                #     assert len(v.shape) >= 4, "assumes 4dim BCHW image tensor!"
-                if k not in raw_stats[name].keys():
-                    raw_stats[name][k] = []
-                raw_stats[name][k].append(self._loss_to_scalar(v))
-            raw_stats[name]["step"].append(int(self._step))
+    def collect_stats(self, task_losses, raw_stats, prefix='train'):
+        """ create/append to stats dict of a one-layer dict structure:
+            {'task_name/loss_key': [..], 'loss_key/task_name':[...]}"""
+        task_names = sorted(task_losses.keys())
+        for task, stats in task_losses.items():
+            # expects: {'button': {"loss_sum": 1, "l_bc": 1}} 
+            for k, v in stats.items(): 
+                for log_key in [ f"{prefix}/{task}/{k}", f"{prefix}/{k}/{task}" ]:
+                    if log_key not in raw_stats.keys():
+                        raw_stats[log_key] = []
+                    raw_stats[log_key].append(self._loss_to_scalar(v))
+            if "step" in raw_stats.keys():
+                raw_stats["step"].append(int(self._step)) 
+            else:
+                raw_stats["step"] = [int(self._step)]
         tr_print = ""
-        for i, (task, v) in enumerate(raw_stats.items()):
+        for i, task in enumerate(task_names): 
             tr_print += "[{0:<9}] l_tot: {1:.1f} l_bc: {2:.1f} l_aux: {3:.1f} l_aux: {4:.1f} ".format( \
-                task, v["loss_sum"][-1], v["l_bc"][-1],
-                v.get("point_loss",[0])[-1], v.get("l_aux",[0])[-1])
-            if running_means:
-                tr_print += " vl_mean: {:.2f}  ".format(running_means.get(task, 0))
-            if i % 3 == 2:
+                task, 
+                raw_stats[f"{prefix}/{task}/loss_sum"][-1], 
+                raw_stats[f"{prefix}/{task}/l_bc"][-1],
+                raw_stats.get(f"{prefix}/{task}/point_loss",[0])[-1], 
+                raw_stats.get(f"{prefix}/{task}/l_aux",[0])[-1]) 
+            if i % 3 == 2: # use two lines to print 
                 tr_print += "\n"
 
         return tr_print
@@ -211,6 +217,7 @@ class Trainer:
         epochs              = self.train_cfg.get('epochs', 1)
         vlm_alpha           = self.train_cfg.get('vlm_alpha', 0.6)
         log_freq            = self.train_cfg.get('log_freq', 1000)
+        val_freq            = self.train_cfg.get('val_freq', 1000)
         print_freq          = self.train_cfg.get('print_freq', 100)
         self._img_log_freq  = img_log_freq = self.train_cfg.get('img_log_freq', 10000)
         assert img_log_freq % log_freq == 0, "log_freq must divide img_log_freq!"
@@ -227,14 +234,15 @@ class Trainer:
         sum_mul             = sum( [task.get('loss_mul', 1) for task in self.tasks] )
         task_loss_muls      = { task.name:
             float("{:3f}".format(task.get('loss_mul', 1) / sum_mul)) for task in self.tasks }
-        print("New(0511): Weighting each task loss separately:", task_loss_muls)
+        print(" Weighting each task loss separately:", task_loss_muls)
         self.generated_png  = False
         self._step          = 0
-        val_iter            = iter(self._val_loader)
-        loss_running_means  = defaultdict(list)
-        raw_val_stats       = OrderedDict({ task.name: dict({"step": []}) for task in self.tasks })
-        raw_train_stats     = OrderedDict({ task.name: dict({"step": []}) for task in self.tasks })
-        vl_running_means    = OrderedDict({ task.name: 0 for task in self.tasks } )
+        val_iter            = iter(self._val_loader) 
+        # log stats to both 'task_name/loss_name' AND 'loss_name/task_name'
+        raw_stats           = dict()
+        print(f"Training for {epochs} epochs train dataloader has length {len(self._train_loader)}, \
+                which sums to {epochs * len(self._train_loader)} total train steps, \
+                validation loader has length {len(self._val_loader)}")
         for e in range(epochs):
             frac = e / epochs
             if self.config.use_byol:
@@ -245,57 +253,56 @@ class Trainer:
                 optimizer.zero_grad()
                 ## calculate loss here:
                 task_losses = self.calculate_task_loss(model, inputs)
+                task_names = sorted(task_losses.keys())
                 weighted_task_loss = sum([l["loss_sum"] * task_loss_muls.get(name) for name, l in task_losses.items()])
                 weighted_task_loss.backward()
                 optimizer.step()
-                ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ##
-                # loss, stats = train_fn(model, self._device, inputs)
-                # calculate iter stats
-                mod_step = self._step % log_freq
-                if mod_step == 0:
-                    train_print = self.collect_stats(task_losses, raw_train_stats)
-                    try:
-                        val_inputs = next(val_iter)
-                    except StopIteration:
-                        val_iter = iter(self._val_loader)
-                        val_inputs = next(val_iter)
-                    if self.config.use_maml: # allow grad!
-                        model = model.eval()
-                        val_task_losses = self.calculate_task_loss(model, val_inputs)
-                        model = model.train()
-                    else:
-                        with torch.no_grad():
+                ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## 
+                # calculate train iter stats
+                if self._step % log_freq == 0:
+                    train_print = self.collect_stats(task_losses, raw_stats, prefix='train')   
+                    
+                    if self._step % print_freq == 0:
+                        print('Training epoch {1}/{2}, step {0}: \t '.format(self._step, e, epochs))
+                        print(train_print)
+                        
+
+                if self._step % val_freq == 0:
+                    # exhaust all data in val loader and take avg loss
+                    all_val_losses = {task: defaultdict(list) for task in task_names}
+                    val_iter = iter(self._val_loader)
+                    for val_inputs in val_iter:
+                        if self.config.use_maml: # allow grad!
                             model = model.eval()
                             val_task_losses = self.calculate_task_loss(model, val_inputs)
-                            model = model.train()
-                    val_print = self.collect_stats(val_task_losses, raw_val_stats, vl_running_means)
-                    # update running mean stat
-                    for name, stats in raw_val_stats.items():
-                        vl_running_means[name] = stats["l_bc"][-1] * vlm_alpha + vl_running_means[name] * (1 - vlm_alpha)
-
-                    # add learning rate parameter to log
-                    lrs = np.mean([p['lr'] for p in optimizer.param_groups])
-                    # self._writer.add_scalar('lr', lrs, self._step)
-                    # flush to disk and print self._writer.file_writer.flush()
-                    print('Training epoch {1}/{2}, step {0}: \t '.format(self._step, e, epochs))
-                    print(train_print)
-                    print('Validation step {}:'.format(self._step))
-                    print(val_print)
-
-
-                elif self._step % print_freq == 0:
-                    running = ""
-                    for k, l in task_losses.items():
-                        running += "[{}: {:.2f}] ".format(k, l["l_bc"].item())
-                    print('step:', self._step, running, end='\r')
-
-                self._step += 1
+                            
+                        else:
+                            with torch.no_grad():
+                                model = model.eval()
+                                val_task_losses = self.calculate_task_loss(model, val_inputs)
+       
+                        for task, losses in val_task_losses.items():
+                            for k, v in losses.items():
+                                all_val_losses[task][k].append(v)
+                    # take average across all batches in the val loader 
+                    avg_losses = dict()
+                    for task, losses in all_val_losses.items():
+                        avg_losses[task] = {
+                            k: torch.mean(torch.stack(v)) for k, v in losses.items()}
+                    
+                    val_print = self.collect_stats(avg_losses, raw_stats, prefix='val')
+                    if self._step % print_freq == 0:
+                        print('Validation step {}:'.format(self._step))
+                        print(val_print)
+                    model = model.train()
+                 
                 # update target params
                 # mod = model.module if isinstance(model, nn.DataParallel) else model
                 # if self._step % self.train_cfg.target_update == 0:
                 #     mod.soft_param_update()
 
-                if self._step % save_freq == 0:
+                if self._step % save_freq == 0: # save model AND stats
+                    self.save_checkpoint(model, optimizer, weights_fn, save_fn)
                     if save_fn is not None:
                         save_fn(self._save_fname, self._step)
                     else:
@@ -308,13 +315,14 @@ class Trainer:
                     if self.config.get('save_optim', False):
                         torch.save(optimizer.state_dict(), self._save_fname + '-optim-{}.pt'.format(self._step))
 
-                    for name, log_stats in zip(\
-                        ['train_stats', 'val_stats', 'vl_means'], [raw_train_stats, raw_val_stats, vl_running_means]):
-                        stats_save_name = join(self.save_dir, 'stats', '{}.json'.format(name))
-                        json.dump({k: str(v) for k, v in log_stats.items()}, open(stats_save_name, 'w'))
-
-            #scheduler.step(val_loss=vl_running_mean)
+                    stats_save_name = join(self.save_dir, 'stats', '{}.json'.format('train_val_stats'))
+                    json.dump({k: str(v) for k, v in raw_stats.items()}, open(stats_save_name, 'w'))
+                    self._step += 1
         ## when all epochs are done, save model one last time
+        self.save_checkpoint(model, optimizer, weights_fn, save_fn)
+
+
+    def save_checkpoint(self, model, optimizer, weights_fn=None, save_fn=None):
         if save_fn is not None:
             save_fn(self._save_fname, self._step)
         else:
@@ -326,7 +334,8 @@ class Trainer:
             torch.save(save_module.state_dict(), self._save_fname + '-{}.pt'.format(self._step))
         if self.config.get('save_optim', False):
             torch.save(optimizer.state_dict(), self._save_fname + '-optim-{}.pt'.format(self._step))
-
+        print(f'Model checkpoint saved at step {self._step}')
+        return 
 
     @property
     def device_count(self):
@@ -483,7 +492,7 @@ class Workspace(object):
 
         os.makedirs(self.trainer.save_dir, exist_ok=('burn' in self.trainer.save_dir))
         os.makedirs(join(self.trainer.save_dir, 'stats'), exist_ok=True)
-        self.trainer._writer = SummaryWriter(log_dir=join(self.trainer.save_dir, 'log'))
+         
         save_config = copy.deepcopy(self.trainer.config)
         OmegaConf.save(config=save_config, f=join(self.trainer.save_dir, 'config.yaml'))
 
@@ -511,32 +520,23 @@ class Workspace(object):
     config_path="experiments", 
     config_name="baselines.yaml")
 def main(cfg):
-    from train_baselines_multitask import Workspace as W
-    if cfg.DATE == '0521':
-        print("Warning(0521), resetting a bunch of configurations for 100x180 images in 0521 dataset:")
-        cfg.dataset_cfg.height      =   100 
-        cfg.dataset_cfg.width       =   180  
-        cfg.augs.weak_crop_ratio    =   [1.8,1.8]  
-        cfg.augs.strong_crop_ratio  =   [1.8,1.8]  
-        cfg.augs.weak_crop_scale    =   [0.7,1.0] 
-        cfg.augs.strong_crop_scale  =   [0.6,1.0] 
-        cfg.place.crop              =   [30,70,90,90]
+    #print(cfg)
+    from train_blines import Workspace as W
+     
     if cfg.use_lstm:
         print("Switching to LSTM model for MT-dataset")
         cfg.policy = copy.deepcopy(cfg.lstm_policy)
     if cfg.use_maml:
         print("Switching to MAML for MT-dataset")
         cfg.policy = copy.deepcopy(cfg.maml_policy)
+    
+    if cfg.single_task:
+        cfg.tasks = [cfg.single_task]
     if cfg.use_all_tasks:
         print("New(0508): loading setting all 7 tasks to the dataset!  obs_T: {} demo_T: {}".format(\
             cfg.dataset_cfg.obs_T, cfg.dataset_cfg.demo_T))
-        cfg.tasks = [cfg.nut_hard, cfg.open, cfg.draw, cfg.press, cfg.place, cfg.stack, cfg.bask_hard]
-    if cfg.use_four:
-        print("New(0511): setting to use four easy tasks combo")
-        cfg.tasks = [cfg.open, cfg.draw, cfg.press, cfg.place]
-    if cfg.use_hard_three:
-        print("New(0511): harder three tasks combo")
-        cfg.tasks = [cfg.nut_hard, cfg.stack, cfg.bask_hard]
+        cfg.tasks = [cfg.nut_assembly, cfg.door, cfg.drawer, cfg.button, cfg.pick_place, cfg.stack_block, cfg.basketball]
+     
     if cfg.set_same_n > -1:
         print('New(0514): setting n_per_task of all tasks to ', cfg.set_same_n)
         for tsk in cfg.tasks:
@@ -548,8 +548,12 @@ def main(cfg):
     if cfg.limit_num_demo > -1:
         print('New(0521): only uses {} demon. trajectory for each sub-task'.format(cfg.limit_num_demo))
         for tsk in cfg.tasks:
-            tsk.traj_per_subtask = cfg.limit_num_demo 
-    
+            tsk.demo_per_subtask = cfg.limit_num_demo 
+    if cfg.weight_loss_by_subtask:
+        print("New(0514): setting the loss multipliers for each task to equal its num of subtasks")
+        for tsk in cfg.tasks:
+            tsk.loss_mul = tsk.n_tasks
+
     workspace = W(cfg)
     workspace.run()
 
