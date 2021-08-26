@@ -9,8 +9,7 @@ sudo apt-get --assume-yes install cmake libopenmpi-dev zlib1g-dev xvfb git g++ l
 ```
 - (Recommended) Create conda environment:
 ```
-conda create -n mosaic python=3.7 pytorch==1.8.1 torchvision==0.9.1 cudatoolkit=10.1 -c pytorch
-conda create -n mosaic python=3.7 pytorch==1.8.1 torchvision==0.9.1 cudatoolkit=10.1 -c pytorch
+conda create -n mosaic python=3.7 pytorch==1.8.1 torchvision==0.9.1 cudatoolkit=10.1 -c pytorch 
 ```
 - Obtain mujoco license and install `mujoco200` first, then
 ```
@@ -25,6 +24,7 @@ pip install pybullet==2.6.9
 ```
 cd mosaic 
 PATH_TO_CONDA_ENV=XXX # replace with local conda env path
+PATH_TO_CONDA_ENV=/home/mandi
 cp tasks/robosuite_env/sawyer/sawyer_arm.urdf ${PATH_TO_CONDA_ENV}/miniconda3/envs/mosaic/lib/python3.7/site-packages/robosuite/models/assets/bullet_data/sawyer_description/urdf/sawyer_arm.urdf 
 ```
 

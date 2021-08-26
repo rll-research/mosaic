@@ -42,21 +42,14 @@ class Trainer:
         def_device = hydra_cfg.device if hydra_cfg.device != -1 else 0
         self._device = torch.device("cuda:{}".format(def_device))
         self._device_list = None
-        self._allow_val_grad = allow_val_grad
-        self.use_amp = self.config.use_amp
+        self._allow_val_grad = allow_val_grad 
         # set of file saving
         assert os.path.exists(self.config.save_path), "Warning! Save path {} doesn't exist".format(self.config.save_path)
         if '/shared' in self.config.save_path:
             print("Warning! saving data to /shared folder \n")
         assert self.config.exp_name != -1, 'Specify an experiment name for log data!'
 
-        append = "-Batch{}".format(int(self.config.bsize))
-        # if self.config.cat_head:
-        #     append += "-headCat"
-        # elif self.config.cat_action:
-        #     append += "-actCat"
-        # else:
-        #     append += "-noCat"
+        append = "-Batch{}".format(int(self.config.bsize)) 
         self.config.exp_name += append
 
         save_dir = join(self.config.get('save_path', './'), str(self.config.exp_name))
@@ -179,7 +172,7 @@ class Trainer:
 
     def collect_stats(self, task_losses, raw_stats, running_means=None):
         for name, stats in task_losses.items():
-            # expects: {'press': {"loss_sum": 1, "l_bc": 1}}
+            # expects: {'button': {"loss_sum": 1, "l_bc": 1}}
             assert name in raw_stats.keys(), 'Got unexpected task name ' + str(name)
             for k, v in stats.items():
                 # if isinstance(v, torch.Tensor):

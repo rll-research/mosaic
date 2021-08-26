@@ -15,8 +15,7 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from multiprocessing import cpu_count
 from torch.utils.data import DataLoader
-from omegaconf import DictConfig, OmegaConf
-# from torch.cuda.amp import autocast, GradScaler
+from omegaconf import DictConfig, OmegaConf 
 from einops.layers.torch import Rearrange, Reduce
 from mosaic.utils.lr_scheduler import build_scheduler
 

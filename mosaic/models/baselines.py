@@ -2,7 +2,7 @@
 Contains baseline models: 
 1) T-OSIL (transformer-based) from Sundeep et al.
 2) LSTM architecture
-3) Plain MLP model
+3) Pure MLP model
 4) MAML meta-learning model from Finn et al.
 
 """
@@ -58,7 +58,7 @@ class _TransformerFeatures(nn.Module):
         return features
 
 class _AblatedFeatures(_TransformerFeatures):
-    def __init__(self, latent_dim, model_type='basic', temp_convs=False, lstm=False, context_T=2):
+    def __init__(self, latent_dim, model_type='resnet', temp_convs=False, lstm=False, context_T=2):
         nn.Module.__init__(self)
 
         # initialize visual network
@@ -212,7 +212,6 @@ class InverseImitation(nn.Module):
         w = torch.linspace(-1, 1, im_shape[1]).reshape((1, 1, -1, 1)).repeat((1, im_shape[0], 1, 1))
         hw = torch.cat((h, w), 3).repeat((goal_embed.shape[0], 1, 1, 1)).to(goal_embed.device)
         obs['point_ll'] = point_dist.log_prob(hw)
-
 
 class DAMLNetwork(nn.Module):
     def __init__(self, n_final_convs, aux_dim=6, adim=8, n_mix=2, T_context=2, const_var=True, maml_lr=None, first_order=None):

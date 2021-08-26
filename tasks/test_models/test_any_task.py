@@ -347,8 +347,8 @@ if __name__ == '__main__':
     if args.use_h != -1 and args.use_w != -1:
         print(f"Reset to non-default render sizes {args.use_h}-by-{args.use_w}")
         heights, widths = args.use_h, args.use_w 
-    if args.env == 'pick_place':
-        assert args.use_h == 150 or args.use_h == 200, 'PickPlace needs larger rendering'
+    #if args.env == 'pick_place':
+    #    assert args.use_h == 150 or args.use_h == 200, 'PickPlace needs larger rendering'
     print("Renderer is using size {} \n".format((heights, widths)))
     
     

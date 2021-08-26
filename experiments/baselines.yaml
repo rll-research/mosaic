@@ -1,8 +1,7 @@
 #hydra:
 #  run:
 #    dir: /home/fangchen/one_shot_transformers/outputs
-EXPERT_DATA:    /home/mandi/robosuite
-DATE:           '0521' # latest small images
+EXPERT_DATA:    /home/mandi/mosaic_multitask_dataset  
 loader_workers: 20 
 save_path:      /home/mandi/mosaic/baseline_data
 save_freq:      1000

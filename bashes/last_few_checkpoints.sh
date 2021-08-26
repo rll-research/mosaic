@@ -2,7 +2,7 @@ for MODEL in /home/mandi/mosaic/log_data/7Task-TempContra-Batch61-2gpu-Attn2ly12
 #export CUDA_VISIBLE_DEVICES=4,5,6,7
 
 do
-for S in 90000 100000 120000
+for S in 79000 78000 77000 
 do
 
 for TASK in door button drawer stack_block pick_place nut_assembly basketball
