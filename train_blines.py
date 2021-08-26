@@ -317,7 +317,7 @@ class Trainer:
 
                     stats_save_name = join(self.save_dir, 'stats', '{}.json'.format('train_val_stats'))
                     json.dump({k: str(v) for k, v in raw_stats.items()}, open(stats_save_name, 'w'))
-                    self._step += 1
+                self._step += 1
         ## when all epochs are done, save model one last time
         self.save_checkpoint(model, optimizer, weights_fn, save_fn)
 
