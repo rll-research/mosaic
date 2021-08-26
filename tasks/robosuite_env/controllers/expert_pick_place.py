@@ -31,7 +31,6 @@ def _clip_delta(delta, max_step=0.015):
 
 class PickPlaceController:
     def __init__(self, env, ranges, tries=0):
-        assert env.single_object_mode == 2, "only supports single object environments at this point!"
         self._env = env
         self._g_tol = 5e-2 ** (tries + 1)
         self.ranges = ranges
@@ -45,7 +44,6 @@ class PickPlaceController:
 
     def reset(self):
         self._object_name = self._env.objects[self._env.object_id].name
-        self._target_loc = self._env.target_bin_placements[self._env.object_id] + [0, 0, 0.3]
         # TODO this line violates abstraction barriers but so does the reference implementation in robosuite
         self._jpos_getter = lambda: np.array(self._env._joint_positions)
         self._clearance = 0.03 if 'milk' not in self._object_name else -0.01
@@ -71,8 +69,8 @@ class PickPlaceController:
 
 
     def _object_in_hand(self, obs):
-        dist_panda = {'milk': 0.045, 'can': 0.03, 'cereal': 0.017, 'bread': 0.018}
-        dist_sawyer = {'milk': 0.042, 'can': 0.025, 'cereal': 0.015, 'bread': 0.015}
+        dist_panda = {'milk': 0.018, 'can': 0.018, 'cereal': 0.018, 'bread': 0.018}
+        dist_sawyer = {'milk': 0.018, 'can': 0.018, 'cereal': 0.018, 'bread': 0.018}
         if "Panda" in self._env.robot_names:
             dist = dist_panda
         else:
@@ -99,6 +97,7 @@ class PickPlaceController:
         return normalize_action(np.concatenate((delta_pos + base_pos, aa)), self.ranges)
 
     def act(self, obs):
+        self._target_loc = np.array(self._env.sim.data.body_xpos[self._env.bin_bodyid]) + [0, 0, 0.3]
         status = 'start'
         if self._t == 0:
             self._start_grasp = -1
@@ -162,8 +161,7 @@ class PickPlaceController:
 
 
 def get_expert_trajectory(env_type, controller_type, renderer=False, camera_obs=True, task=None, ret_env=False,
-                          seed=None, force_success=False, env_seed=None, depth=False, heights=100, widths=200, 
-                          novel_obj=False, gpu_id=0, **kwargs):
+                          seed=None, env_seed=None, depth=False, heights=100, widths=200, gpu_id=0, **kwargs):
     assert 'gpu' in str(mujoco_py.cymj), 'Make sure to render with GPU to make eval faster'
     # reassign the gpu id
     visible_ids = os.environ['CUDA_VISIBLE_DEVICES'].split(',')
@@ -180,18 +178,16 @@ def get_expert_trajectory(env_type, controller_type, renderer=False, camera_obs=
     success, use_object = False, None
     if task is not None:
         assert 0 <= task <= 15, "task should be in [0, 15]"
-        use_object = int(task // 4)
-        rg, db, = False, task % 4
     else:
-        rg, db = True, None
+        raise NotImplementedError
 
     if ret_env:
         while True:
             try:
-                env = get_env(env_type, force_object=use_object, controller_configs=controller_type, randomize_goal=rg,
-                              default_bin=db, has_renderer=renderer, has_offscreen_renderer=camera_obs,
+                env = get_env(env_type, controller_configs=controller_type,
+                              task_id=task, has_renderer=renderer, has_offscreen_renderer=camera_obs,
                               reward_shaping=False, use_camera_obs=camera_obs, camera_heights=heights, camera_widths=widths,
-                              camera_depths=depth, ranges=action_ranges, use_novel_objects=novel_obj,
+                              camera_depths=depth, ranges=action_ranges,
                               camera_names="agentview", render_gpu_device_id=gpu_id, **kwargs)
                 break
             except RandomizationError:
@@ -201,18 +197,18 @@ def get_expert_trajectory(env_type, controller_type, renderer=False, camera_obs=
     tries = 0
     while True:
         try:
-            env = get_env(env_type, force_object=use_object, controller_configs=controller_type, randomize_goal=rg,
-                          default_bin=db, has_renderer=renderer, has_offscreen_renderer=camera_obs,
+            env = get_env(env_type, controller_configs=controller_type,
+                          task_id=task, has_renderer=renderer, has_offscreen_renderer=camera_obs,
                           reward_shaping=False, use_camera_obs=camera_obs, camera_heights=heights,
-                          camera_widths=widths, force_success=force_success, camera_depths=depth, ranges=action_ranges,
-                          use_novel_objects=novel_obj, camera_names="agentview", 
+                          camera_widths=widths, camera_depths=depth, ranges=action_ranges,
+                          camera_names="agentview",
                           render_gpu_device_id=gpu_id, **kwargs)
             break
         except RandomizationError:
             pass
     while not success:
         controller = PickPlaceController(env.env, tries=tries, ranges=action_ranges)
-        np.random.seed(seed + int(tries // 3) + seed_offset)
+        np.random.seed(seed + int(tries) + seed_offset)
         while True:
             try:
                 obs = env.reset()
@@ -253,5 +249,6 @@ def get_expert_trajectory(env_type, controller_type, renderer=False, camera_obs=
 
 if __name__ == '__main__':
     config = load_controller_config(default_controller='IK_POSE')
-    traj = get_expert_trajectory('SawyerPickPlaceDistractor', config, renderer=True, camera_obs=False, task=0, novel_obj=False,
-                                 render_camera='agentview')
+    for i in range(8, 16):
+        traj = get_expert_trajectory('SawyerPickPlaceDistractor', config, renderer=True, camera_obs=False, task=i,
+                                 render_camera='frontview')

@@ -204,6 +204,11 @@ class Mug(MyMujocoXMLObject):
                          name=name,
                          obj_type="all")
 
+class Bin(MyMujocoXMLObject):
+    def __init__(self, name='bin'):
+        super().__init__(os.path.join(BASE_DIR, 'bins.xml'),
+                         name=name)
+
 class HammerBlock(MyMujocoXMLObject):
     def __init__(self, name='hammerblock'):
         super().__init__(os.path.join(BASE_DIR, 'hammerblock.xml'), name=name)

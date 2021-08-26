@@ -1,0 +1,51 @@
+<mujoco model="bin">
+    <compiler angle="radian" inertiafromgeom="auto"/>
+    <asset>
+        <texture name="T_shelf_wood" type="cube" file="textures/wood1.png"/>
+        <material name="case" texture="T_shelf_wood" reflectance="0.7" texrepeat="5 5" texuniform="true"/>
+    </asset>
+    <default>
+        <default class="case">
+            <geom conaffinity="1" condim="3" contype="1" group="0" material="case" solimp="0.99 0.99 0.01"
+                  solref="0.01 1" density="8000"/>
+        </default>
+    </default>
+
+    <worldbody>
+        <body>
+            <body name="object">
+                <body name="box_1" pos="0 -0.25 0.03">
+                    <geom class="case" pos="0 -0.075 0.03" size="0.08 0.005 0.03" type="box"/>
+                    <geom class="case" pos="0 0.075 0.03" size="0.08 0.005 0.03" type="box"/>
+                    <geom class="case" pos="0.075 0 0.03" size="0.005 0.07 0.03" type="box"/>
+                    <geom class="case" pos="-0.075 0 0.03" size="0.005 0.07 0.03" type="box"/>
+                    <geom class="case" pos="0 0 0.005" size="0.08 0.08 0.005" type="box"/>
+                </body>
+                <body name="box_2" pos="0.0 -0.1 0.03">
+                    <geom class="case" pos="0 -0.075 0.03" size="0.08 0.005 0.03" type="box"/>
+                    <geom class="case" pos="0 0.075 0.03" size="0.08 0.005 0.03" type="box"/>
+                    <geom class="case" pos="0.075 0 0.03" size="0.005 0.07 0.03" type="box"/>
+                    <geom class="case" pos="-0.075 0 0.03" size="0.005 0.07 0.03" type="box"/>
+                    <geom class="case" pos="0 0 0.005" size="0.08 0.08 0.005" type="box"/>
+                </body>
+                <body name="box_3" pos="0.0 0.05 0.03">
+                    <geom class="case" pos="0 -0.075 0.03" size="0.08 0.005 0.03" type="box"/>
+                    <geom class="case" pos="0 0.075 0.03" size="0.08 0.005 0.03" type="box"/>
+                    <geom class="case" pos="0.075 0 0.03" size="0.005 0.07 0.03" type="box"/>
+                    <geom class="case" pos="-0.075 0 0.03" size="0.005 0.07 0.03" type="box"/>
+                    <geom class="case" pos="0 0 0.005" size="0.08 0.08 0.005" type="box"/>
+                </body>
+                <body name="box_4" pos="0.0 0.2 0.03">
+                    <geom class="case" pos="0 -0.075 0.03" size="0.08 0.005 0.03" type="box"/>
+                    <geom class="case" pos="0 0.075 0.03" size="0.08 0.005 0.03" type="box"/>
+                    <geom class="case" pos="0.075 0 0.03" size="0.005 0.07 0.03" type="box"/>
+                    <geom class="case" pos="-0.075 0 0.03" size="0.005 0.07 0.03" type="box"/>
+                    <geom class="case" pos="0 0 0.005" size="0.08 0.08 0.005" type="box"/>
+                </body>
+            </body>
+            <site rgba="0 0 0 0" size="0.0005" pos="0 0 -0.08" name="bottom_site"/>
+            <site rgba="0 0 0 0" size="0.0005" pos="0 0 0.65" name="top_site"/>
+            <site rgba="0 0 0 0" size="0.0005" pos="0.011 0.09 0" name="horizontal_radius_site"/>
+        </body>
+    </worldbody>
+</mujoco>
