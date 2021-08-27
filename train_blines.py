@@ -59,7 +59,7 @@ class Trainer:
         self._step = None
 
     def calculate_maml_loss(self, meta_model, model_inputs):
-        device = self._device
+        device = self._device #orch.device("cuda:1") #self._device
         states, actions = model_inputs['states'], model_inputs['actions']
         images, context = model_inputs['images'], model_inputs['demo']
         aux = model_inputs['aux_pose']
@@ -273,8 +273,9 @@ class Trainer:
                     val_iter = iter(self._val_loader)
                     for val_inputs in val_iter:
                         if self.config.use_maml: # allow grad!
-                            model = model.eval()
-                            val_task_losses = self.calculate_task_loss(model, val_inputs)
+                            eval_model = nn.DataParallel(
+                                model.eval().module, device_ids=self.device_list[1:])
+                            val_task_losses = self.calculate_task_loss(eval_model, val_inputs)
                             
                         else:
                             with torch.no_grad():
@@ -535,7 +536,7 @@ def main(cfg):
     if cfg.use_all_tasks:
         print("New(0508): loading setting all 7 tasks to the dataset!  obs_T: {} demo_T: {}".format(\
             cfg.dataset_cfg.obs_T, cfg.dataset_cfg.demo_T))
-        cfg.tasks = [cfg.nut_assembly, cfg.door, cfg.drawer, cfg.button, cfg.pick_place, cfg.stack_block, cfg.basketball]
+        cfg.tasks = [cfg.nut_assembly, cfg.door, cfg.drawer, cfg.button, cfg.new_pick_place, cfg.stack_block, cfg.basketball]
      
     if cfg.set_same_n > -1:
         print('New(0514): setting n_per_task of all tasks to ', cfg.set_same_n)
