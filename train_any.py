@@ -145,7 +145,7 @@ class Trainer:
                 ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## 
                 # calculate train iter stats
                 if self._step % log_freq == 0:
-                    train_print = self.collect_stats(task_losses, raw_stats, prefix='train')   
+                    train_print = collect_stats(self._step, task_losses, raw_stats, prefix='train')   
                     
                     if self._step % print_freq == 0:
                         print('Training epoch {1}/{2}, step {0}: \t '.format(self._step, e, epochs))
@@ -160,11 +160,11 @@ class Trainer:
                     for val_inputs in val_iter:
                         if self.config.use_daml: # allow grad!
                             
-                            val_task_losses = calculate_task_loss(self.confg, self._device, model, val_inputs)
+                            val_task_losses = calculate_task_loss(self.confg, self.train_cfg,  self._device, model, val_inputs)
                             
                         else:
                             with torch.no_grad(): 
-                                val_task_losses = calculate_task_loss(self.config, self.train_cfg, model, val_inputs)
+                                val_task_losses = calculate_task_loss(self.config, self.train_cfg, self._device, model, val_inputs)
        
                         for task, losses in val_task_losses.items():
                             for k, v in losses.items():

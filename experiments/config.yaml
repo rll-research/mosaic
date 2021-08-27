@@ -2,6 +2,7 @@
 save_path:      /home/mandi/mosaic/log_data
 save_freq:      1000
 log_freq:       1000
+val_freq:       1000 
 print_freq:     1000
 save_optim:     False
 resume:         False

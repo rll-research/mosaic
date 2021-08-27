@@ -2,7 +2,7 @@ log_data/*
 baseline_data/*
 outputs/*
 wandb/*
-
+*.TXT
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
