@@ -1,5 +1,5 @@
 """
-Evaluate each task for the same number of --eval_each_task times. 
+Evaluate >=1 checkpoints saved throughout one model's training run 
 """
 from robosuite import load_controller_config
 from robosuite.utils.transform_utils import quat2axisangle
@@ -47,14 +47,13 @@ from torchvision.transforms.functional import resized_crop
 from torchvision.transforms import RandomAffine, ToTensor, Normalize, \
     RandomGrayscale, ColorJitter, RandomApply, RandomHorizontalFlip, GaussianBlur, RandomResizedCrop
 import matplotlib.pyplot as plt
+from glob import glob 
 import learn2learn as l2l
 import wandb 
 
 set_start_method('forkserver', force=True)
 USER = 'mandi'
-MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape((3,1,1))
-STD = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape((3,1,1))
-
+ 
 TASK_MAP = {
     'basketball': {
         'num_variations':   12, 
@@ -142,12 +141,9 @@ def build_tvf_formatter(config, env_name='stack'):
     dataset_cfg = config.train_cfg.dataset
     height, width = dataset_cfg.get('height', 100), dataset_cfg.get('width', 180)
     task_spec = config.get(env_name, None)
-    # if 'baseline' in config.policy._target_: # yaml for the CMU baseline is messed up
-    #     crop_params = [10, 50, 70, 70] if env_name == 'place' else [0,0,0,0]
-
+ 
     assert task_spec, 'Must go back to the saved config file to get crop params for this task: '+env_name 
     crop_params = task_spec.get('crop', [0,0,0,0])
-    #print(crop_params)
     top, left = crop_params[0], crop_params[2]
     def resize_crop(img):
         if len(img.shape) == 4:
@@ -208,7 +204,7 @@ def build_env_context(img_formatter, T_context=4, ctr=0, env_name='nut',
     return agent_env, context, variation, teacher_expert_rollout
 
 def rollout_imitation(model, config, ctr, 
-    heights=100, widths=200, size=0, shape=0, color=0, max_T=60, env_name='place', gpu_id=-1, baseline=None):
+    heights=100, widths=200, size=0, shape=0, color=0, max_T=60, env_name='button', gpu_id=-1, baseline=None):
     if gpu_id == -1:
         gpu_id = int(ctr % torch.cuda.device_count())
     model = model.cuda(gpu_id)
@@ -229,7 +225,7 @@ def rollout_imitation(model, config, ctr,
     assert build_task, 'Got unsupported task '+env_name
     eval_fn = build_task['eval_fn']
     traj, info = eval_fn(model, env, context, gpu_id, variation_id, img_formatter, baseline=baseline)
-    print("Evaluated traj #{}, task#{}, reached? {} picked? {} success? {} ".format(ctr, variation_id, info['reached'], info['picked'], info['success']))
+    #print("Evaluated traj #{}, task#{}, reached? {} picked? {} success? {} ".format(ctr, variation_id, info['reached'], info['picked'], info['success']))
     return traj, info, expert_traj
 
 def _proc(model, config, results_dir, heights, widths, size, shape, color, env_name, baseline, n):
@@ -260,14 +256,20 @@ if __name__ == '__main__':
     parser.add_argument('--N', default=-1, type=int)
     parser.add_argument('--use_h', default=-1, type=int)
     parser.add_argument('--use_w', default=-1, type=int)
-    parser.add_argument('--num_workers', default=3, type=int)
+    parser.add_argument('--num_workers', default=7, type=int)
+    
+    parser.add_argument('--last_few',  default=-1, type=int, help='if set >0, evaluate the last few saved checkpoints')
+    parser.add_argument('--eval_all', action='store_true', help='whether to evaluate all saved checkpoints')
+    parser.add_argument('--eval_steps', '-s', nargs='+', type=int)
+
+
+    parser.add_argument('--eval_tasks',  nargs='+', default='door', type=str)
+    parser.add_argument('--eval_each_task',  default=10, type=int)
+    parser.add_argument('--eval_subsets',  default=0, type=int)
     parser.add_argument('--size', action='store_true') # for block stacking only!
     parser.add_argument('--shape', action='store_true')
     parser.add_argument('--color', action='store_true')
-    parser.add_argument('--env' , '-e', default='door', type=str)
-    parser.add_argument('--eval_each_task',  default=30, type=int)
-    parser.add_argument('--eval_subsets',  default=0, type=int)
-    parser.add_argument('--saved_step', '-s', default=1000, type=int)
+
     parser.add_argument('--baseline', '-bline', default=None, type=str, help='baseline uses more frames at each test-time step')
 
 
@@ -281,131 +283,134 @@ if __name__ == '__main__':
         if not os.path.exists(try_path):
             try_path = join(f'/home/{USER}/mosaic/baseline_data', args.model)
         assert os.path.exists(try_path), "Cannot find appending dir anywhere"
-    if 'model_save' not in args.model:
-        print("Appending saved step {}".format(args.saved_step))
-        try_path = join(try_path, 'model_save-{}.pt'.format(args.saved_step))
-        assert os.path.exists(try_path), "Cannot find anywhere: " + str(try_path)
     
-    model_path = os.path.expanduser(try_path)
-    
-    assert args.env in TASK_MAP.keys(), "Got unsupported environment {}".format(args.env)
-    results_dir = os.path.join(
-        os.path.dirname(model_path), 'results_{}/'.format(args.env))
-    if args.env == 'stack_block':
-        if (args.size or args.shape or args.color):
-            results_dir = os.path.join( os.path.dirname(model_path), \
-                'results_stack_size{}-shape{}-color-{}'.format(int(args.size), int(args.shape), int(args.color)) )
-    
-    
-    assert args.env != '', 'Must specify correct task to evaluate'
-    os.makedirs(results_dir, exist_ok=True)
-    model_saved_step = model_path.split("/")[-1].split("-")
-    model_saved_step.remove("model_save")
-    model_saved_step = model_saved_step[0][:-3]
-    print("loading model from saved training step %s"% model_saved_step)
-    results_dir = os.path.join(results_dir, 'step-'+model_saved_step)
-    os.makedirs(results_dir, exist_ok=True)
-    print("Made new path for results at: %s"%results_dir)
-    config_path = os.path.expanduser(args.config) if args.config else os.path.join(os.path.dirname(model_path), 'config.yaml')
- 
-    config = OmegaConf.load(config_path)
-    print('Multi-task dataset, tasks used: ', config.tasks )
-     
-
+    ## decide which checkpoints to eval:
+    checkpoints = glob( join(try_path, "*.pt") )
+    saved_steps = sorted([
+        int( (c.split("/")[-1].split("-"))[-1][:-3] ) for c in checkpoints
+        ])
+    assert len(checkpoints) > 0, f'Cannot find any checkpoints saved to {try_path}'
+    print('All the saved checkpoints found:', saved_steps)
+    config_path = join(try_path, 'config.yaml')
+    config = OmegaConf.load(config_path) 
     model = hydra.utils.instantiate(config.policy)
-    
-    # assert torch.cuda.device_count() <= 5, "Let's restrict visible GPUs to not hurt other processes. E.g. export CUDA_VISIBLE_DEVICES=0,1"
-    build_task = TASK_MAP.get(args.env, None)
-    assert build_task, 'Got unsupported task '+args.env
-
-    if args.N == -1:
-        args.N = int(args.eval_each_task * build_task.get('num_variations', 0))
-        if args.eval_subsets:
-            print("evaluating only first {} subtasks".format(args.eval_subsets))
-            args.N = int(args.eval_each_task * args.eval_subsets)
-    assert args.N, "Need pre-define how many trajs to test for each env"
-    print('Found {} GPU devices, using {} parallel workers for evaluating {} total trajectories\n'.format(torch.cuda.device_count(), args.num_workers, args.N))
-
-    T_context = config.policy.demo_T # a different set of config scheme
-    #heights, widths = config.train_cfg.dataset.get('height', 100), config.train_cfg.dataset.get('width', 200)
-    heights, widths = build_task.get('render_hw', (100, 180))
-    if args.use_h != -1 and args.use_w != -1:
-        print(f"Reset to non-default render sizes {args.use_h}-by-{args.use_w}")
-        heights, widths = args.use_h, args.use_w 
-    #if args.env == 'pick_place':
-    #    assert args.use_h == 150 or args.use_h == 200, 'PickPlace needs larger rendering'
-    print("Renderer is using size {} \n".format((heights, widths)))
-    
-    
     model._2_point = None
     model._target_embed = None
     if 'mt_rep' in config.policy._target_:
         model.skip_for_eval()
-    loaded = torch.load(model_path, map_location=torch.device('cpu'))
-    if config.get('use_maml', False):
-        removed = OrderedDict({k.replace('module.', ''): v for k,v in loaded.items()})
-        model.load_state_dict(removed)
-        model = l2l.algorithms.MAML(
-                model, 
-                lr=config['policy']['maml_lr'], 
-                first_order=config['policy']['first_order'], 
-                allow_unused=True)
-    else:
-        model.load_state_dict(loaded)
+    print('Model was trained on tasks: ', config.tasks )
+    
+    if not args.eval_all:
+        if args.last_few > 0:
+            saved_steps = saved_steps[- args.last_few:]
+        if args.eval_steps:
+            saved_steps = [s for s in saved_steps if s in args.eval_steps ]
+    print('Actually evaluating checkpoints:', saved_steps)
  
-    model = model.eval()#.cuda()
-    n_success = 0
-    size = args.size
-    shape = args.shape
-    color = args.color
 
-    parallel = args.num_workers > 1
-    f = functools.partial(_proc, model, config, results_dir, heights, widths, size, shape, color, args.env, args.baseline)
+    for task in args.eval_tasks:
+        assert task in TASK_MAP.keys(), "Got unsupported task environment {}".format(task)
+    print('Evaluating each checkpoint on task(s):', args.eval_tasks)
+    
+    
+    for s in saved_steps:
+        model_path = join(try_path, f'model_save-{s}.pt')
+        print("loading model from saved training step %s"% s)
+        loaded = torch.load(model_path, map_location=torch.device('cpu'))
+        if config.get('use_maml', False):
+            removed = OrderedDict({k.replace('module.', ''): v for k,v in loaded.items()})
+            model.load_state_dict(removed)
+            model = l2l.algorithms.MAML(
+                    model, 
+                    lr=config['policy']['maml_lr'], 
+                    first_order=config['policy']['first_order'], 
+                    allow_unused=True)
+        else:
+            model.load_state_dict(loaded)
+        model = model.eval()#.cuda()
 
-    if parallel:
-        with Pool(args.num_workers) as p:
-            task_success_flags = p.map(f, range(args.N))
-    else:
-        task_success_flags = [f(n) for n in range(args.N)]
+        # iterating through tasks
+        for task in args.eval_tasks:
+            results_dir = os.path.join(
+                os.path.dirname(model_path), 'results_{}/'.format(task), f'step-{s}')
+            if task == 'stack_block':
+                if (args.size or args.shape or args.color):
+                    results_dir = os.path.join( os.path.dirname(model_path), \
+                        'results_stack_size{}-shape{}-color-{}'.format(int(args.size), int(args.shape), int(args.color)) )
+            os.makedirs(results_dir, exist_ok=True)
+ 
+            build_task = TASK_MAP.get(task, None)
+            assert build_task, 'Got unsupported task '+task
 
-    if args.wandb_log:
-        model_name = model_path.split("/")[-2]
-        run = wandb.init(project='mosaic', job_type='test', group=model_name)
-        run.name = model_name + f'-Test_{args.env}-Step_{model_saved_step}' 
+            if args.N == -1:
+                args.N = int(args.eval_each_task * build_task.get('num_variations', 0))
+                if args.eval_subsets:
+                    print("evaluating only first {} subtasks".format(args.eval_subsets))
+                    args.N = int(args.eval_each_task * args.eval_subsets)
+            assert args.N, "Need pre-define how many trajs to test for each env"
+            print('Found {} GPU devices, using {} parallel workers for evaluating {} total trajectories\n'.format(torch.cuda.device_count(), args.num_workers, args.N))
 
-        wandb.config.update(args)
-        for i, t in enumerate(task_success_flags):
-            wandb.log({
-                'episode': i, 
-                'reached': float(t['reached']),
-                'picked': float(t['picked']),
-                'success': float(t['success']),
-                'variation': int(t['variation_id']),
-            })
-        all_succ_flags = [t['success'] for t in task_success_flags]
+            heights, widths = build_task.get('render_hw', (100, 180))
+            if args.use_h != -1 and args.use_w != -1:
+                print(f"Reset to non-default render sizes {args.use_h}-by-{args.use_w}")
+                heights, widths = args.use_h, args.use_w 
+            print("Renderer is using size {} \n".format((heights, widths)))
+             
+    
+            n_success = 0
+            size = args.size
+            shape = args.shape
+            color = args.color
 
-        wandb.log({
-            'avg_success': np.mean(all_succ_flags),
-            'success_err': np.mean(all_succ_flags) / np.sqrt(args.N),
-            })
+            parallel = args.num_workers > 1
+            f = functools.partial(_proc, model, config, results_dir, heights, widths, size, shape, color, task, args.baseline)
+
+            if parallel:
+                with Pool(args.num_workers) as p:
+                    task_success_flags = p.map(f, range(args.N))
+            else:
+                task_success_flags = [f(n) for n in range(args.N)]
+
+            final_results = dict()
+            for k in ['reached', 'picked', 'success']:
+                n_success = sum([t[k] for t in task_success_flags])
+                print('Task {}, rate {}'.format(k, n_success / float(args.N)))
+                final_results[k] = n_success / float(args.N)
+            variation_ids = defaultdict(list)
+            for t in task_success_flags:
+                _id = t['variation_id']
+                variation_ids[_id].append(t['success'])
+            for _id in variation_ids.keys():
+                num_eval = len(variation_ids[_id])
+                rate = sum(variation_ids[_id]) / num_eval 
+                final_results['task#'+str(_id)] = rate 
+                print('Success rate on task#'+str(_id), rate)
+
+            final_results['N'] = int(args.N)
+            final_results['model_saved'] = model_saved_step
+            json.dump({k:v for k, v in final_results.items()}, open(results_dir+'/test_across_{}trajs.json'.format(args.N), 'w'))
 
 
-    final_results = dict()
-    for k in ['reached', 'picked', 'success']:
-        n_success = sum([t[k] for t in task_success_flags])
-        print('Task {}, rate {}'.format(k, n_success / float(args.N)))
-        final_results[k] = n_success / float(args.N)
-    variation_ids = defaultdict(list)
-    for t in task_success_flags:
-        _id = t['variation_id']
-        variation_ids[_id].append(t['success'])
-    for _id in variation_ids.keys():
-        num_eval = len(variation_ids[_id])
-        rate = sum(variation_ids[_id]) / num_eval 
-        final_results['task#'+str(_id)] = rate 
-        print('Success rate on task#'+str(_id), rate)
 
-    final_results['N'] = int(args.N)
-    final_results['model_saved'] = model_saved_step
-    json.dump({k:v for k, v in final_results.items()}, open(results_dir+'/test_across_{}trajs.json'.format(args.N), 'w'))
+    # if args.wandb_log:
+    #     model_name = model_path.split("/")[-2]
+    #     run = wandb.init(project='mosaic', job_type='test', group=model_name)
+    #     run.name = model_name + f'-Test_{args.env}-Step_{model_saved_step}'  
+    #     wandb.config.update(args)
+    #     for i, t in enumerate(task_success_flags):
+    #         wandb.log({
+    #             'episode': i, 
+    #             'reached': float(t['reached']),
+    #             'picked': float(t['picked']),
+    #             'success': float(t['success']),
+    #             'variation': int(t['variation_id']),
+    #         })
+    #     all_succ_flags = [t['success'] for t in task_success_flags]
 
+    #     wandb.log({
+    #         'avg_success': np.mean(all_succ_flags),
+    #         'success_err': np.mean(all_succ_flags) / np.sqrt(args.N),
+    #         })
+
+
+    
