@@ -7,7 +7,7 @@ eval_freq:      50
 # eval_task:      ${task.name}
 use_amp:        False # not seeing big improvement from True
 save_optim:     False
-repeat_last:    False
+# repeat_last:    False
 resume:         False
 resume_path:    None
 device:         -1
@@ -16,6 +16,7 @@ exp_name:       -1
 epochs:         10
 bsize:          30
 vsize:          30 # optionally use a smaller batchsize for validation loader
+
 inv_mul:        1
 bc_mul:         1
 pnt_mul:        0

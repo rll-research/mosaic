@@ -226,6 +226,8 @@ def rollout_imitation(model, config, ctr,
     eval_fn = build_task['eval_fn']
     traj, info = eval_fn(model, env, context, gpu_id, variation_id, img_formatter, baseline=baseline)
     #print("Evaluated traj #{}, task#{}, reached? {} picked? {} success? {} ".format(ctr, variation_id, info['reached'], info['picked'], info['success']))
+    print("Evaluated traj #{}, variation#{}, success? {} ".format(ctr, variation_id, info['success']))
+    
     return traj, info, expert_traj
 
 def _proc(model, config, results_dir, heights, widths, size, shape, color, env_name, baseline, n):
@@ -256,7 +258,7 @@ if __name__ == '__main__':
     parser.add_argument('--N', default=-1, type=int)
     parser.add_argument('--use_h', default=-1, type=int)
     parser.add_argument('--use_w', default=-1, type=int)
-    parser.add_argument('--num_workers', default=7, type=int)
+    parser.add_argument('--num_workers', default=3, type=int)
     
     parser.add_argument('--last_few',  default=-1, type=int, help='if set >0, evaluate the last few saved checkpoints')
     parser.add_argument('--eval_all', action='store_true', help='whether to evaluate all saved checkpoints')
@@ -387,7 +389,7 @@ if __name__ == '__main__':
                 print('Success rate on task#'+str(_id), rate)
 
             final_results['N'] = int(args.N)
-            final_results['model_saved'] = model_saved_step
+            final_results['model_saved'] = s
             json.dump({k:v for k, v in final_results.items()}, open(results_dir+'/test_across_{}trajs.json'.format(args.N), 'w'))
 
 

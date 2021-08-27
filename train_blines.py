@@ -16,17 +16,16 @@ import torch.nn.functional as F
 from multiprocessing import cpu_count
 from torch.utils.data import DataLoader
 from omegaconf import DictConfig, OmegaConf
-from torch.cuda.amp import autocast, GradScaler
-from einops.layers.torch import Rearrange, Reduce
+
 from mosaic.utils.lr_scheduler import build_scheduler
 from einops import rearrange, reduce, repeat, parse_shape
 from mosaic.models.discrete_logistic import DiscreteMixLogistic
 from collections import defaultdict, OrderedDict
 from hydra.utils import instantiate
 from mosaic.datasets.multi_task_datasets import BatchMultiTaskSampler, DIYBatchSampler, collate_by_task # need for val. loader
-from mosaic.datasets import Trajectory
-import torchvision
-from torch.utils.data._utils.collate import default_collate
+
+
+
 torch.autograd.set_detect_anomaly(True)
 import learn2learn as l2l
 # for visualization
@@ -67,8 +66,7 @@ class Trainer:
         meta_model = meta_model.to(device)
         inner_iters = self.config.get('inner_iters', 1)
         l2error = torch.nn.MSELoss()
-
-        #error = 0
+ 
         bc_loss, aux_loss = [], []
 
         for task in range(states.shape[0]):
@@ -250,6 +248,24 @@ class Trainer:
                 mod.momentum_update(frac)
 
             for inputs in self._train_loader:
+
+                if self._step % save_freq == 0: # save model AND stats
+                    self.save_checkpoint(model, optimizer, weights_fn, save_fn)
+                    if save_fn is not None:
+                        save_fn(self._save_fname, self._step)
+                    else:
+                        save_module = model
+                        if weights_fn is not None:
+                            save_module = weights_fn()
+                        elif isinstance(model, nn.DataParallel):
+                            save_module = model.module
+                        torch.save(save_module.state_dict(), self._save_fname + '-{}.pt'.format(self._step))
+                    if self.config.get('save_optim', False):
+                        torch.save(optimizer.state_dict(), self._save_fname + '-optim-{}.pt'.format(self._step))
+
+                    stats_save_name = join(self.save_dir, 'stats', '{}.json'.format('train_val_stats'))
+                    json.dump({k: str(v) for k, v in raw_stats.items()}, open(stats_save_name, 'w'))
+                    
                 optimizer.zero_grad()
                 ## calculate loss here:
                 task_losses = self.calculate_task_loss(model, inputs)
@@ -301,26 +317,10 @@ class Trainer:
                 # if self._step % self.train_cfg.target_update == 0:
                 #     mod.soft_param_update()
 
-                if self._step % save_freq == 0: # save model AND stats
-                    self.save_checkpoint(model, optimizer, weights_fn, save_fn)
-                    if save_fn is not None:
-                        save_fn(self._save_fname, self._step)
-                    else:
-                        save_module = model
-                        if weights_fn is not None:
-                            save_module = weights_fn()
-                        elif isinstance(model, nn.DataParallel):
-                            save_module = model.module
-                        torch.save(save_module.state_dict(), self._save_fname + '-{}.pt'.format(self._step))
-                    if self.config.get('save_optim', False):
-                        torch.save(optimizer.state_dict(), self._save_fname + '-optim-{}.pt'.format(self._step))
-
-                    stats_save_name = join(self.save_dir, 'stats', '{}.json'.format('train_val_stats'))
-                    json.dump({k: str(v) for k, v in raw_stats.items()}, open(stats_save_name, 'w'))
+                
                 self._step += 1
         ## when all epochs are done, save model one last time
         self.save_checkpoint(model, optimizer, weights_fn, save_fn)
-
 
     def save_checkpoint(self, model, optimizer, weights_fn=None, save_fn=None):
         if save_fn is not None:

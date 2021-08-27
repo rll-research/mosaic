@@ -54,7 +54,7 @@ tasks:                  ??? #['${open}','${press}','${draw}','${place}']
 use_all_tasks:          False 
 use_four:               False 
 use_hard_three:         False 
-single_task:            ???
+single_task:            False
 set_same_n:             -1 
 limit_num_traj:         -1 
 limit_num_demo:         -1

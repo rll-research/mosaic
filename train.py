@@ -25,9 +25,8 @@ from collections import defaultdict, OrderedDict
 from hydra.utils import instantiate
 from mosaic.datasets.multi_task_datasets import \
     BatchMultiTaskSampler, DIYBatchSampler, collate_by_task # need for val. loader
-from mosaic.datasets import Trajectory
-# import torchvision
-from torch.utils.data._utils.collate import default_collate
+
+ 
 torch.autograd.set_detect_anomaly(True)
 # for visualization
 MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape((1,3,1,1))

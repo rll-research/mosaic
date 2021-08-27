@@ -10,6 +10,9 @@ sudo apt-get --assume-yes install cmake libopenmpi-dev zlib1g-dev xvfb git g++ l
 - (Recommended) Create conda environment:
 ```
 conda create -n mosaic python=3.7 pytorch==1.8.1 torchvision==0.9.1 cudatoolkit=10.1 -c pytorch 
+[trying pabrtxs3:]
+conda create -n mosaic python=3.8 pytorch==1.8.1 torchvision==0.9.1 cudatoolkit=11.3  -c pytorch 
+
 ```
 - Obtain mujoco license and install `mujoco200` first, then
 ```
