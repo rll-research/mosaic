@@ -140,9 +140,9 @@ def build_tvf_formatter(config, env_name='stack'):
     """
     dataset_cfg = config.train_cfg.dataset
     height, width = dataset_cfg.get('height', 100), dataset_cfg.get('width', 180)
-    task_spec = config.get(env_name, None)
+    task_spec = config.get(env_name, dict())
  
-    assert task_spec, 'Must go back to the saved config file to get crop params for this task: '+env_name 
+    #assert task_spec, 'Must go back to the saved config file to get crop params for this task: '+env_name 
     crop_params = task_spec.get('crop', [0,0,0,0])
     top, left = crop_params[0], crop_params[2]
     def resize_crop(img):
@@ -221,7 +221,7 @@ def rollout_imitation(model, config, ctr,
         T_context=T_context, ctr=ctr, env_name=env_name, 
         heights=heights, widths=widths, size=size, shape=shape, color=color, gpu_id=gpu_id)
     
-    build_task = TASK_MAP.get(env_name, None)
+    build_task = TASK_MAP.get(env_name, dict())
     assert build_task, 'Got unsupported task '+env_name
     eval_fn = build_task['eval_fn']
     traj, info = eval_fn(model, env, context, gpu_id, variation_id, img_formatter, baseline=baseline)

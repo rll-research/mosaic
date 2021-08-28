@@ -141,11 +141,11 @@ def build_tvf_formatter(config, env_name='stack'):
     """
     dataset_cfg = config.train_cfg.dataset
     height, width = dataset_cfg.get('height', 100), dataset_cfg.get('width', 180)
-    task_spec = config.get(env_name, None)
+    task_spec = config.get(env_name, dict())
     # if 'baseline' in config.policy._target_: # yaml for the CMU baseline is messed up
     #     crop_params = [10, 50, 70, 70] if env_name == 'place' else [0,0,0,0]
 
-    assert task_spec, 'Must go back to the saved config file to get crop params for this task: '+env_name 
+    #assert task_spec, 'Must go back to the saved config file to get crop params for this task: '+env_name 
     crop_params = task_spec.get('crop', [0,0,0,0])
     #print(crop_params)
     top, left = crop_params[0], crop_params[2]

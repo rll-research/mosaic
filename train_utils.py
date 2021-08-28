@@ -97,12 +97,14 @@ def collect_stats(step, task_losses, raw_stats, prefix='train'):
             raw_stats["step"] = [int(step)]
     tr_print = ""
     for i, task in enumerate(task_names): 
-        tr_print += "[{0:<9}] l_tot: {1:.1f} l_bc: {2:.1f} l_aux: {3:.1f} l_aux: {4:.1f} ".format( \
+        tr_print += "[{0:<9}] l_tot: {1:.1f} l_bc: {2:.1f} l_pnt: {3:.1f} l_aux: {4:.1f} l_rep: {5: 1f}".format( \
             task, 
             raw_stats[f"{prefix}/{task}/loss_sum"][-1], 
             raw_stats[f"{prefix}/{task}/l_bc"][-1],
-            raw_stats.get(f"{prefix}/{task}/point_loss",[0])[-1], 
-            raw_stats.get(f"{prefix}/{task}/l_aux",[0])[-1]) 
+            raw_stats.get( f"{prefix}/{task}/point_loss",[0] )[-1], 
+            raw_stats.get( f"{prefix}/{task}/l_aux",[0] )[-1],
+            raw_stats.get( f"{prefix}/{task}/rep_loss",[0] )[-1],
+            )
         if i % 3 == 2: # use two lines to print 
             tr_print += "\n"
 
