@@ -32,6 +32,7 @@ train_cfg:
   epochs:               ${epochs}
   log_freq:             ${log_freq}
   val_freq:             ${val_freq}
+  save_freq:            ${save_freq}
   print_freq:           ${print_freq}
   inv_loss_mult:        ${inv_mul}
   bc_loss_mult:         ${bc_mul}
