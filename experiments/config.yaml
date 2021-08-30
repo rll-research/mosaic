@@ -31,11 +31,12 @@ train_cfg:
   lr:                   5e-4
   epochs:               ${epochs}
   log_freq:             ${log_freq}
+  val_freq:             ${val_freq}
+  print_freq:           ${print_freq}
   inv_loss_mult:        ${inv_mul}
   bc_loss_mult:         ${bc_mul}
   pnt_loss_mult:        ${pnt_mul}
   rep_loss_muls:        ${rep_muls}
-  target_update:        5 
   dataset:              ${dataset_cfg}
   sampler:              ${samplers}
 
@@ -95,7 +96,7 @@ augs:
   rand_trans:        0.1
 
 # contrastive related
-target_update_freq: -1
+target_update_freq: 5
 simclr:
   demo_T:           ${train_cfg.dataset.demo_T}
   obs_T:            ${train_cfg.dataset.obs_T} 

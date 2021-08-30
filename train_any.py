@@ -85,10 +85,8 @@ class Trainer:
         vlm_alpha           = self.train_cfg.get('vlm_alpha', 0.6)
         log_freq            = self.train_cfg.get('log_freq', 1000)
         val_freq            = self.train_cfg.get('val_freq', 1000)
-        print_freq          = self.train_cfg.get('print_freq', 100)
-        self._img_log_freq  = img_log_freq = self.train_cfg.get('img_log_freq', 10000)
-        assert img_log_freq % log_freq == 0, "log_freq must divide img_log_freq!"
-        save_freq           = self.config.get('save_freq', 10000)
+        print_freq          = self.train_cfg.get('print_freq', 10000) 
+        save_freq           = self.train_cfg.get('save_freq', 10000)
 
         print("Loss multipliers: \n BC: {} inv: {} Point: {}".format(
             self.train_cfg.bc_loss_mult, self.train_cfg.inv_loss_mult, self.train_cfg.pnt_loss_mult))
@@ -313,7 +311,7 @@ class Workspace(object):
     config_path="experiments", 
     config_name="config.yaml")
 def main(cfg):
-    #print(cfg)
+     
     from train_any import Workspace as W
     all_tasks_cfgs = [cfg.tasks_cfgs.nut_assembly, cfg.tasks_cfgs.door, cfg.tasks_cfgs.drawer, cfg.tasks_cfgs.button, cfg.tasks_cfgs.new_pick_place, cfg.tasks_cfgs.stack_block, cfg.tasks_cfgs.basketball]
     
@@ -330,9 +328,12 @@ def main(cfg):
         cfg.tasks = [tsk for tsk in all_tasks_cfgs if tsk.name != cfg.exclude_task]
     
     if cfg.set_same_n > -1:
-        print('Setting n_per_task of all tasks to ', cfg.set_same_n)
         for tsk in cfg.tasks:
             tsk.n_per_task = cfg.set_same_n
+        cfg.train_cfg.batch_size = sum( [tsk.n_tasks * cfg.set_same_n for tsk in cfg.tasks] )
+        cfg.train_cfg.val_size = cfg.train_cfg.batch_size
+        print(f'Set n_per_task of all tasks to {cfg.set_same_n}, new train/val batch sizes: {cfg.train_cfg.batch_size}/{cfg.train_cfg.val_size}')
+        
     
     if cfg.limit_num_traj > -1:
         print('Only using {} trajectory for each sub-task'.format(cfg.limit_num_traj))
@@ -342,7 +343,10 @@ def main(cfg):
         print('Only using {} demon. trajectory for each sub-task'.format(cfg.limit_num_demo))
         for tsk in cfg.tasks:
             tsk.demo_per_subtask = cfg.limit_num_demo 
-  
+    
+    if 'mosaic' not in cfg.policy._target_:
+        print(f'Running baseline method: {cfg.policy._target_}')
+        cfg.target_update_freq = -1
     workspace = W(cfg)
     workspace.run()
 
