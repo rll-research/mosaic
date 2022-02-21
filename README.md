@@ -1,6 +1,6 @@
-Code for Paper: Towards More Generalizable One-Shot Visual Imitation Learning
+# Towards More Generalizable One-Shot Visual Imitation Learning
 ArXiv: https://arxiv.org/abs/2110.13423
-Cite: 
+
 ## Installation
 Note that the below instructions are mainly tested on Linux x86_64 with NVIDIA GPUs (`Driver Version: 465.19.01 CUDA Version: 11.3`) 
 1. package update:
