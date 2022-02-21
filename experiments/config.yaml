@@ -1,4 +1,3 @@
-# training configs:
 save_path:      /home/mandi/mosaic/log_data
 save_freq:      1000
 log_freq:       1000
@@ -58,11 +57,9 @@ loader_workers:     20
 samplers:        
   batch_size:         ${bsize}
   drop_last:          False
-  init_ratio:         'even'
   shuffle:            True 
-  use_diy:            True 
-val_skip:               false # whether to let the samplers skip some **sub**tasks
-train_skip:             true
+val_skip:             False # whether to let the samplers skip some **sub**tasks
+train_skip:           True
 
 dataset_cfg:
   _target_:         'mosaic.datasets.multi_task_datasets.MultiTaskPairedDataset'
@@ -84,16 +81,16 @@ dataset_cfg:
   use_strong_augs:  True 
 
 augs:
-  strong_jitter:     0.01   # or 0.4
+  strong_jitter:     0.01    
   weak_jitter:       0.01
-  grayscale:         0.01   # or 0.1
-  blur:              [0.1, 2.0] # 
+  grayscale:         0.01   
+  blur:              [0.1, 2.0] 
   flip:              0.05   # only flip for the strong augs
   weak_crop_scale:   [0.7, 1.0] 
   strong_crop_scale: [0.6, 1.0] 
   weak_crop_ratio:   [1.8, 1.8]
   strong_crop_ratio: [1.8, 1.8]
-  use_affine:        false  
+  use_affine:        False  
   rand_trans:        0.1
 
 # contrastive related
@@ -103,13 +100,11 @@ simclr:
   obs_T:            ${train_cfg.dataset.obs_T} 
   mul_pre:          1
   mul_pos:          1
-  mul_intm:         1
+  mul_intm:         0
   tau:              0.005      
   compressor_dim:   128
   temporal:         True
   hidden_dim:       256
-  share_W:          False 
-  loss_twice:       False
   fix_step:         -1 
 byol: 
   p:                2
@@ -127,38 +122,37 @@ byol:
   mul_demo:         0
 
 # model related
-policy: ??? # set to any set of configs via command line, e.g. policy='${tosil}'
+policy: ???  # set to any set of configs via command line, e.g. policy='${tosil}'
 
 mosaic:
-  _target_:           mosaic.models.mt_rep.VideoImitation # hem.models.atc_tcc.TwoEncoderImitation
+  _target_:           mosaic.models.mt_rep.VideoImitation 
   latent_dim:         40
   sdim:               9
   concat_state:       False
   height:             ${train_cfg.dataset.height}
-  width:              ${train_cfg.dataset.width} # to figure out output dim for ATC encoder
+  width:              ${train_cfg.dataset.width} 
   demo_T:             ${train_cfg.dataset.demo_T}
   obs_T:              ${train_cfg.dataset.obs_T}   
   dim_H:              7
   dim_W:              12  
   demo_mean:          True 
   action_cfg:         ${actions}
-  concat_demo_head:   ${cat_head}
-  concat_demo_act:    ${cat_action}
+  concat_demo_head:   True
+  concat_demo_act:    False 
   attn_cfg:           ${attn}
   byol_config:        ${byol}
   simclr_config:      ${simclr}
-cat_head:             True 
-cat_action:           False
+
 actions:
-  n_layers:         2   # increase to  2 here
+  n_layers:         2    
   out_dim:          64
   hidden_dim:       128
   adim:             8
-  n_mixtures:       4  # increase to 4?
-  const_var:        True
+  n_mixtures:       4   
+  const_var:        False
   sep_var:          True 
-  concat_demo_head: ${cat_head}
-  concat_demo_act:  ${cat_action}
+  concat_demo_head: True
+  concat_demo_act:  False
   demo_mean:        ${policy.demo_mean}
 
 attn:
@@ -168,16 +162,14 @@ attn:
   attn_heads:       4
   attn_ff:          128
   pos_enc:          True 
-  two_img_encoder:  False
-  fuse_starts:      0   # default 0 so attn everywhere
+  fuse_starts:      0   # default 0 so attend everywhere
   causal:           True
-  use_iter:         False 
   attend_demo:      True
   demo_out:         True     
-  img_cfg:          # for image encoder
-    network_flag:   0 # all use res18 now!
+  img_cfg:           
+    network_flag:   0 # e.g Res18  
     out_feature:    256
-    drop_dim:       3 #
+    drop_dim:       3 
     pretrained:     False 
 
 tosil:
@@ -188,7 +180,7 @@ tosil:
     n_layers:       1
     is_rnn:         False
   vis:
-    conv_drop_dim:  3 # different than original codebase!
+    conv_drop_dim:  3 
     st_goal_attn:   True
     n_st_attn:      2
     use_pe:         True

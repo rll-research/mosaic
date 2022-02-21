@@ -1,16 +1,13 @@
 import random
-import os
-import json
 import torch
 from os.path import join, expanduser
 from mosaic.datasets import load_traj, split_files
 
-from torch.utils.data import Dataset, Sampler, DataLoader, SubsetRandomSampler, RandomSampler
+from torch.utils.data import Dataset, Sampler, SubsetRandomSampler, RandomSampler
 from torch.utils.data._utils.collate import default_collate
 from torchvision import transforms
 from torchvision.transforms import RandomAffine, ToTensor, Normalize, \
     RandomGrayscale, ColorJitter, RandomApply, RandomHorizontalFlip, GaussianBlur, RandomResizedCrop
-from torchvision.transforms import functional as TvF
 from torchvision.transforms.functional import resized_crop
 
 import pickle as pkl
@@ -18,13 +15,11 @@ from collections import defaultdict, OrderedDict
 import glob 
 import numpy as np 
 import matplotlib.pyplot as plt
-MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape((1,3,1,1))
-STD = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape((1,3,1,1))
+
 JITTER_FACTORS = {'brightness': 0.4, 'contrast': 0.4, 'saturation': 0.4, 'hue': 0.1} 
 
 def collate_by_task(batch):
-    """Use this for validation: groups data by task names, so we
-    can get per-task losses """
+    """ Use this for validation: groups data by task names to compute per-task losses """
     per_task_data = defaultdict(list)
     for b in batch:
         per_task_data[b['task_name']].append(
@@ -320,7 +315,7 @@ class MultiTaskPairedDataset(Dataset):
                 state.append(_get_tensor(k, step_t))
             ret_dict['states'].append(np.concatenate(state).astype(np.float32)[None])
 
-            if j >= 1: # TODO: just give all actions
+            if j >= 1:  
                 action = []
                 for k in action_keys:
                     action.append(_get_tensor(k, step_t))
@@ -342,159 +337,9 @@ class MultiTaskPairedDataset(Dataset):
         return ret_dict
 
 
-
-class BatchMultiTaskSampler(Sampler):
-    def __init__(
-        self,
-        task_to_idx,
-        subtask_to_idx,
-        sampler_spec=dict(),
-        tasks_spec=dict(),
-        ):
-        """
-        Based on the torch.BatchSampler class, add more fine-grained control over
-        how to sample from different tasks and compose one batch.
-        Args:
-        - batch_size:
-            total number of samples draw at each yield step
-        - task_to_idx:
-            { task_name: [all_idxs_for this task] }
-        - sub_task_to_idx:
-            { task_name:
-                {sub_task_id: [all_idxs_for this sub-task]} }
-
-        -> all indics in both these dict()'s should match the total dataset size,
-           used for constructing samplers:
-           different from the default BatchSampler,
-        """
-        batch_size = sampler_spec.get('batch_size', 30)
-        drop_last  = sampler_spec.get('drop_last', False)
-        init_ratio = sampler_spec.get('init_ratio', 'even')
-        if not isinstance(batch_size, int) or isinstance(batch_size, bool) or \
-                batch_size <= 0:
-            raise ValueError("batch_size should be a positive integer value, "
-                             "but got batch_size={}".format(batch_size))
-        if not isinstance(drop_last, bool):
-            raise ValueError("drop_last should be a boolean value, but got "
-                             "drop_last={}".format(drop_last))
-
-        self.shuffle = sampler_spec.get('shuffle', False)
-        self.task_samplers = OrderedDict()
-        self.task_iterators = OrderedDict() # iterators change, but samplers are fixed
-        self.task_info = OrderedDict()
-
-        for spec in tasks_spec:
-            task_name  = spec.get('name', None)
-            assert task_name, 'Need task name for '+str(spec)
-            idxs = task_to_idx.get(task_name, None)
-            assert idxs, 'Need corresponding data idxes for task '+task_name
-            self.task_samplers[task_name] = OrderedDict(
-                {'all_sub_tasks': SubsetRandomSampler(idxs)}) # uniformly draw from union of all sub-tasks
-            self.task_iterators[task_name] = OrderedDict(
-                {'all_sub_tasks': iter(SubsetRandomSampler(idxs))})
-
-            assert task_name in subtask_to_idx.keys(), \
-                'Mismatch between {} task idxs and subtasks!'.format(task_name)
-            num_loaded_sub_tasks = len(subtask_to_idx[task_name].keys())
-            first_id = list(subtask_to_idx[task_name].keys())[0]
-
-            sub_task_size = len(subtask_to_idx[task_name].get(first_id))
-            print("Task {:<9} loaded {} subtasks, starting from {}, should all have sizes {}".format(\
-                task_name, num_loaded_sub_tasks, first_id, sub_task_size))
-            for sub_task, sub_idxs in subtask_to_idx[task_name].items():
-                self.task_samplers[task_name][sub_task] = SubsetRandomSampler(sub_idxs)
-                assert len(sub_idxs) == sub_task_size, \
-                    'Got uneven data sizes for sub-{} under the task {}!'.format(sub_task, task_name)
-
-                self.task_iterators[task_name][sub_task] = iter(SubsetRandomSampler(sub_idxs))
-            curr_task_info = {
-                'size':                 len(idxs),
-                'n_tasks':              len(subtask_to_idx[task_name].keys()),
-                'sub_id_to_name':       {i: name for i, name in enumerate(subtask_to_idx[task_name].keys())},
-                'subtask_names':        list(subtask_to_idx[task_name].keys()),
-                'subtask_per_batch':    spec.get('task_per_batch', len(subtask_to_idx[task_name].keys())) # if not specified, allow all subtasks to be added to one single batch
-            }
-            self.task_info[task_name] = curr_task_info
-
-        n_tasks = len(self.task_samplers.keys())
-        n_total = sum([info['size'] for info in self.task_info.values()])
-        actual_batch_size = 0
-        for name, subtask_samplers in self.task_samplers.items():
-            info = self.task_info[name]
-            if init_ratio == 'even':
-                sub_size = int(batch_size / n_tasks)
-            elif init_ratio == 'proportional':
-                sub_size = int(batch_size * info['size'] / n_total)
-            else:
-                raise NotImplementedError
-            actual_batch_size += sub_size
-            self.task_info[name]['sub_size'] = sub_size
-            self.task_info[name]['sampler_len'] = int(info['size'] / sub_size) - 1 if drop_last else int(info['size'] / sub_size)
-        #print(self.task_info)
-        print('Finished initializing sampler. Batch sizes:')
-        for k, v in self.task_info.items():
-            print(k, ': per-task batch size', v['sub_size'])
-
-        self.max_len = max([info['sampler_len'] for info in self.task_info.values()])
-        print('Max length for sampler iterator:', self.max_len)
-        self.n_tasks = n_tasks
-        self.batch_size = actual_batch_size
-        print("After distributing, actual batch size is: ", actual_batch_size)
-        self.drop_last = drop_last
-
-    def __iter__(self):
-        """Given task families A,B,C, each has sub-tasks A00, A01,...
-        Fix a total self.batch_size, sample different numbers of datapoints from
-        each task"""
-        batch = []
-        for i in range(self.max_len):
-            for name, info in self.task_info.items():
-                subsize = info['sub_size']
-                num_subtasks = info['subtask_per_batch']
-                ## given N total subtasks, first select a subset of K types, then, randomly
-                # select from them to construct a batch
-                random.shuffle(info['subtask_names'])
-                subtasks = info['subtask_names'][: num_subtasks] # get from permuted subtask names
-                for idx in range(subsize):
-                    random.shuffle(subtasks)
-                    sub_task = subtasks[0]
-                    sampler = self.task_samplers[name][sub_task]
-                    iterator = self.task_iterators[name][sub_task]
-                    try:
-                        batch.append(next(iterator))
-                    except StopIteration:
-                        #print('early sstop:', i, name)
-                        iterator = iter(sampler) # re-start the smaller-sized tasks
-                        batch.append(next(iterator))
-                        self.task_iterators[name][sub_task] = iterator
-
-            if len(batch) == self.batch_size:
-                if self.shuffle:
-                    random.shuffle(batch)
-                yield batch
-                batch = []
-        if len(batch) > 0 and not self.drop_last:
-            yield batch
-
-    def __len__(self):
-        # Since different task may have different data sizes,
-        # define total length of sampler as number of iterations to
-        # exhaust the last task
-        return self.max_len
-
-    def _update_ratio(self, new_task_sizes=dict()):
-        new_batch_size = 0
-        for name, new_size in new_task_sizes.items():
-            assert name in self.task_info.keys(), 'Task {} is not present in this dataset'.format(name)
-            self.task_info[name]['sub_size'] = new_size
-            new_batch_size += new_size
-        assert new_batch_size == self.batch_size, 'After updating, total batch size becomes {}, previous was {}'.format(new_batch_size, self.batch_size)
-
 class DIYBatchSampler(Sampler):
     """
-    New(0504): remove the batch_spec dict, just get those info from tasks_spec
-    Use this sampler to customize any possible combination of both task families
-    and sub-tasks in a batch of data.
+    Customize any possible combination of both task families and sub-tasks in a batch of data.
     """
     def __init__(
         self,
@@ -536,7 +381,6 @@ class DIYBatchSampler(Sampler):
         """
         batch_size = sampler_spec.get('batch_size', 30)
         drop_last  = sampler_spec.get('drop_last', False)
-        init_ratio = sampler_spec.get('init_ratio', 'even')
         if not isinstance(batch_size, int) or isinstance(batch_size, bool) or \
                 batch_size <= 0:
             raise ValueError("batch_size should be a positive integer value, "

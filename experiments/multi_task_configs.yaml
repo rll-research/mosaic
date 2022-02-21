@@ -4,10 +4,7 @@ save_path:      /home/mandi/mosaic/log_data
 save_freq:      1000
 eval_starts:    50 # count by epochs
 eval_freq:      50
-# eval_task:      ${task.name}
-use_amp:        False # not seeing big improvement from True
 save_optim:     False
-# repeat_last:    False
 resume:         False
 resume_path:    None
 device:         -1
@@ -19,7 +16,7 @@ vsize:          30 # optionally use a smaller batchsize for validation loader
 
 inv_mul:        1
 bc_mul:         1
-pnt_mul:        0
+
 log_freq:       1000
 print_freq:     1000
 train_cfg:
@@ -48,14 +45,11 @@ muls:
 
 tasks:                  [ '${button}'] #,'${press}','${draw}','${place}'] 
 use_all_tasks:          False 
-use_four:               False 
-use_hard_three:         False 
 set_same_n:             -1
 limit_num_traj:         -1 
 limit_num_demo:         -1
-weight_loss_by_subtask: False
-mla: False
-multi_layer_actions:    ${mla} # New(0610)
+
+ 
 # NOTE: different data organization than single task!
 dataset_cfg:
   _target_:         'mosaic.datasets.multi_task_datasets.MultiTaskPairedDataset'
@@ -196,20 +190,15 @@ samplers:       # NOTE(0504): some args are for MutlTaskSampler, some are for DI
   drop_last:          False
   init_ratio:         'even'
   shuffle:            True 
-  use_diy:            True 
-val_skip:               false # whether to let the samplers skip some **sub**tasks
-train_skip:             true
+val_skip:             False # whether to let the samplers skip some **sub**tasks
+train_skip:           True
 
-# New(0502): DIY batch sampling
-# try: taskset -c 35-45 python train_mt_simple.py sampler_spec.use_diy=1 exp_name=burn bsize=32
-# taskset -c 35-45 python train_mt_simple.py sampler_spec.use_diy=1 exp_name=burn bsize=38 tasks=['${place}','${stack}'] batch_spec.stack.n_per_task=2
+# DIY batch sampling
 freeze_img_encoder:     false
 freeze_attn_layers:      -1
 train_encoder_only:     False
 restart_action_layers:  False
-
-cat_head:             True 
-cat_action:           False
+ 
 actions:
   n_layers:         2   # increase to  2 here
   out_dim:          64
@@ -218,8 +207,8 @@ actions:
   n_mixtures:       4  # increase to 4?
   const_var:        True
   sep_var:          True 
-  concat_demo_head: ${cat_head}
-  concat_demo_act:  ${cat_action}
+  concat_demo_head: True 
+  concat_demo_act:  False 
   demo_mean:        ${policy.demo_mean}
 
 attn:
@@ -240,10 +229,9 @@ attn:
     out_feature:    256
     drop_dim:       3 #
     pretrained:     False
-use_byol:           True
-# byol_policy:          # NOTE: no spatial embed, network_flag=0
+
 policy:
-  _target_:           mosaic.models.mt_rep.VideoImitation # hem.models.atc_tcc.TwoEncoderImitation
+  _target_:           mosaic.models.mt_rep.VideoImitation 
   latent_dim:         40
   sdim:               9
   concat_state:       False
@@ -255,8 +243,8 @@ policy:
   dim_W:              12  
   demo_mean:          True 
   action_cfg:         ${actions}
-  concat_demo_head:   ${cat_head}
-  concat_demo_act:    ${cat_action}
+  concat_demo_head:   True
+  concat_demo_act:    False
   attn_cfg:           ${attn}
   byol_config:        ${byol}
   simclr_config:      ${simclr}
@@ -266,16 +254,14 @@ simclr:
   obs_T:            ${train_cfg.dataset.obs_T} 
   mul_pre:          1
   mul_pos:          1
-  mul_intm:         1
+  mul_intm:         0
   tau:              0.005      
   compressor_dim:   128
   temporal:         True
   hidden_dim:       256
-  share_W:          False 
-  loss_twice:       False
   fix_step:         -1 
 
-byol: 
+byol: # used only for ablation
   p:                2
   project_dim:      128
   hidden_dim:       256

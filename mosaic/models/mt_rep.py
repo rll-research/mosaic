@@ -1,28 +1,15 @@
+import copy 
 import torch
-import hydra 
 import torch.nn as nn
 import numpy as np
-from torch import einsum
 import torch.nn.functional as F
 from mosaic.models import get_model
 from mosaic.models.discrete_logistic import DiscreteMixLogistic
 from mosaic.models.rep_modules import BYOLModule, ContrastiveModule
 from mosaic.models.basic_embedding import TemporalPositionalEncoding 
-
-import copy 
-from einops import rearrange, reduce, repeat, parse_shape
-from einops.layers.torch import Rearrange, Reduce
-from itertools import chain
+from einops import rearrange, repeat, parse_shape
 from collections import OrderedDict
-
-def make_target(mlp):
-    target = copy.deepcopy(mlp)
-    target.load_state_dict(mlp.state_dict())
-    for p in target.parameters():
-        p.requires_grad = False 
-    return target
-
-
+ 
 class _StackedAttnLayers(nn.Module):
     """
     Returns all intermediate-layer outputs, in case we want to re-use features + add more losses later
@@ -160,17 +147,13 @@ class _StackedAttnLayers(nn.Module):
 
 class _TransformerFeatures(nn.Module):
     """
-    (0427)
-    1. removed the patch option
-    2. always concat the embedded demo. but not always using it
-    3. try remove spatial embed? reduce(mean) is too naive, maybe normalize is better
-    (0412) Not using con_encoder right now
+    Transformer-like module for computing self-attention on convolution features
     """
     def __init__(
         self, latent_dim, demo_T=4, dim_H=7, dim_W=12, embed_hidden=256, dropout=0.2, n_attn_layers=2,
         pos_enc=True, attn_heads=4, attn_ff=128, just_conv=False,
-        pretrained=True, img_cfg=None, drop_dim=2, two_img_encoder=False,
-        causal=True, use_iter=False, attend_demo=True, demo_out=True,
+        pretrained=True, img_cfg=None, drop_dim=2, 
+        causal=True, attend_demo=True, demo_out=True,
         fuse_starts=0):
         super().__init__()
 
@@ -192,25 +175,11 @@ class _TransformerFeatures(nn.Module):
             self._img_encoder = encoder_class(img_cfg.out_feature, img_cfg.kernel)
             conv_feature_dim = img_cfg.out_feature
 
-        self.two_img_encoder = two_img_encoder
-        if two_img_encoder:
-            self._con_encoder = copy.deepcopy(self._img_encoder)
-
-        # Removed: self._temporal_process = ...
-        # New(0427): wrap up a stack of attention layers together
-        if use_iter:
-            self._attn_layers = _IterativeLayers(
-                in_dim=conv_feature_dim, out_dim=conv_feature_dim, n_layers=n_attn_layers,
-                demo_ff_dim=attn_ff, obs_ff_dim=attn_ff, dropout=dropout,
-                causal=causal, n_heads=attn_heads, demo_T=demo_T, attend_demo=attend_demo,
-                demo_out=demo_out,
-            )
-        else:
-            self._attn_layers = _StackedAttnLayers(
-                in_dim=conv_feature_dim, out_dim=conv_feature_dim, n_layers=n_attn_layers,
-                demo_ff_dim=attn_ff, obs_ff_dim=attn_ff, dropout=dropout,
-                causal=causal, n_heads=attn_heads, demo_T=demo_T, fuse_starts=fuse_starts,
-            )
+        self._attn_layers = _StackedAttnLayers(
+            in_dim=conv_feature_dim, out_dim=conv_feature_dim, n_layers=n_attn_layers,
+            demo_ff_dim=attn_ff, obs_ff_dim=attn_ff, dropout=dropout,
+            causal=causal, n_heads=attn_heads, demo_T=demo_T, fuse_starts=fuse_starts,
+        )
 
         self._pe = TemporalPositionalEncoding(conv_feature_dim, dropout) if pos_enc else None
         self.demo_out = demo_out
@@ -224,18 +193,12 @@ class _TransformerFeatures(nn.Module):
             nn.Linear(embed_hidden, latent_dim))
 
     def forward(self, images, context):
-        # print(images.shape, context.shape)
         assert len(images.shape) == 5, "expects [B, T, 3, height, width] tensor!"
         obs_T, demo_T = images.shape[1], context.shape[1]
         out_dict = OrderedDict()
-        # if context.shape[1] == 1: # prob. ok to skip
-        #     context = torch.cat((context, context), 1)
+
         network_fn = self._resnet_features if self.network_flag == 0 else self._impala_features
-        # if self.two_img_encoder:
-        #     obs_features, _ = network_fn(images, is_context=False)
-        #     demo_features, _ = network_fn(context, is_context=True)
-        #     im_features = torch.cat((demo_features, obs_features), dim=1)
-        # else:
+
         im_in                     = torch.cat((context, images), 1)
         im_features, no_pe_img_features = network_fn(im_in)
         out_dict['img_features']  = no_pe_img_features # B T d H W
@@ -249,7 +212,7 @@ class _TransformerFeatures(nn.Module):
         out_dict['attn_features'] = features
         out_dict['demo_features'], out_dict['obs_features'] = \
             features.split([demo_T, obs_T], dim=1)
-        # TODO: do repre. on all intermediate layers too
+        # could also try do repre. on all intermediate layers too
         for k, v in attn_out.items():
             if k != 'last' and v.shape == attn_features.shape:
                 reshaped = rearrange(v, 'B d T H W -> B T d H W', **sizes)
@@ -270,25 +233,17 @@ class _TransformerFeatures(nn.Module):
         # NOTE(0427) this should always have length demo_T + obs_T now
         return out_dict
 
-    def _resnet_features(self, x, is_context=False):
-        if self.two_img_encoder and is_context:
-            encoder = self._con_encoder
-        else:
-            encoder = self._img_encoder
+    def _resnet_features(self, x):
         if self._pe is None:
-            return encoder(x)
-        features = encoder(x) # x is B, T, ch, h, w -> B, T, d, H, W
+            return self._img_encoder(x)
+        features = self._img_encoder(x) # x is B, T, ch, h, w -> B, T, d, H, W
         pe_features = self._pe(features.transpose(1,2))
         return pe_features, features # B T d H W
 
-    def _impala_features(self, x, is_context=False):
+    def _impala_features(self, x):
         sizes = parse_shape(x, 'B T _ _ _') # batch_size, concat_size = x.shape[0], x.shape[1] # B, T_c+T_im, 3, height, width
         x = rearrange(x, 'B T ch height width -> (B T) ch height width')
-        if self.two_img_encoder and is_context:
-            encoder = self._con_encoder
-        else:
-            encoder = self._img_encoder
-        features = encoder(x) # B*T, d=256, H=6, W=9
+        features = self._img_encoder(x) # B*T, d=256, H=6, W=9
         features = rearrange(features, '(B T) d H W -> B d T H W', **sizes)
         if self._pe is None:
             return features
@@ -361,8 +316,8 @@ class VideoImitation(nn.Module):
         for p in self._target_embed.parameters():
             p.requires_grad = False             # only update with soft param update!
 
-        # one ATC/CURL module calculate multiple losses
-        # calculate feature dimensions here
+        # one auxillary module calculate multiple losses
+        # create a dummy input to calculate feature dimensions here
         with torch.no_grad():
             x = torch.zeros((1, demo_T+obs_T, 3, height, width))
 
@@ -421,7 +376,8 @@ class VideoImitation(nn.Module):
             out_dim=action_cfg.adim,
             n_mixtures=action_cfg.n_mixtures,
             const_var=action_cfg.const_var,
-            sep_var=action_cfg.sep_var)
+            sep_var=action_cfg.sep_var
+            )
         self.demo_mean = demo_mean
 
 
@@ -430,7 +386,7 @@ class VideoImitation(nn.Module):
         print('Total params in Imitation module:', params)
 
 
-    def get_action(self, embed_out, ret_dist=True):
+    def get_action(self, embed_out, ret_dist=True, states=None):
         """directly modifies output dict to put action outputs inside"""
         out = dict()
         ## single-head case
@@ -444,17 +400,13 @@ class VideoImitation(nn.Module):
             demo_embed          = demo_embed[:, -1, :] # only take the last image, should alread be attended tho
         demo_embed              = repeat(demo_embed, 'B d -> B ob_T d', ob_T=obs_T)
 
-        if self.concat_demo_act: # for action model
-             
+        if self.concat_demo_act: # for action model 
             ac_in                 = torch.cat((img_embed, demo_embed), dim=2)
             ac_in               = F.normalize(ac_in, dim=2)
         ac_in                   = torch.cat((ac_in, states), 2) if self._concat_state else ac_in
         # predict behavior cloning distribution
         ac_pred                 = self._action_module(ac_in)
         if self.concat_demo_head:
-            # if self.query_task:
-            #     task_embed      = repeat(embed_out['task_embed'], 'B d -> B ob_T d', ob_T=obs_T)
-            #     ac_pred         = torch.cat((ac_pred, task_embed), dim=2)
             ac_pred             = torch.cat((ac_pred, demo_embed), dim=2)
             ac_pred             = F.normalize(ac_pred, dim=2) # maybe better to normalize here
 
@@ -463,52 +415,6 @@ class VideoImitation(nn.Module):
             if ret_dist else (mu_bc, scale_bc, logit_bc)
         out['demo_embed']       = demo_embed
         ## multi-head case? maybe register a name for each action head
-        return out
-
-    def calculate_action_losses(self, actions, embed_out, ret_dist=False):
-        """Instead of the training script, calculate l_bc and l_inv here, optionally using intermediate
-            attention layer outputs"""
-        out = dict()
-
-        for i in range(self._embed._attn_layers._n_layers):
-            demo_embed, img_embed = embed_out['attn_out_%s_demo'%i], embed_out['attn_out_%s_img'%i]
-            assert demo_embed.shape[1] == self._demo_T
-            obs_T, ac_in = img_embed.shape[1], img_embed
-            demo_embed = torch.mean(demo_embed, dim=1) if self.demo_mean else demo_embed[:, -1, :] # only take the last image, should alread be attended tho
-            demo_embed = repeat(demo_embed, 'B d -> B ob_T d', ob_T=obs_T)
-            if self.concat_demo_act: # for action model
-                ac_in = torch.cat((img_embed, demo_embed), dim=2)
-                ac_in = F.normalize(ac_in, dim=2)
-            ac_in = torch.cat((ac_in, states), 2) if self._concat_state else ac_in
-            # predict behavior cloning distribution
-            ac_pred = self._action_module(ac_in)
-            if self.concat_demo_head:
-                ac_pred = torch.cat((ac_pred, demo_embed), dim=2)
-                ac_pred = F.normalize(ac_pred, dim=2) # maybe better to normalize here
-
-            mu_bc, scale_bc, logit_bc = self._action_dist(ac_pred)
-            action_distribution = DiscreteMixLogistic(mu_bc[:,:-1], scale_bc[:,:-1], logit_bc[:,:-1])
-            act_prob = rearrange(- action_distribution.log_prob(actions), 'B n_mix act_dim -> B (n_mix act_dim)')
-            out['bc_prob_%s'%i] = act_prob #torch.mean(act_prob, dim=-1)
-
-                # run inverse model
-            inv_in = torch.cat((img_embed[:,:-1], img_embed[:,1:]), 2)  # B, T_im-1, d * 2
-            if self.concat_demo_act:
-                inv_in   = torch.cat(
-                    (
-                    F.normalize(torch.cat((img_embed[:, :-1], demo_embed[:,:-1]), dim=2), dim=2),
-                    F.normalize(torch.cat((img_embed[:,  1:], demo_embed[:,:-1]), dim=2), dim=2),
-                    ), dim=2)
-
-            inv_pred                     = self._inv_model(inv_in)
-            if self.concat_demo_head:
-                inv_pred                 = torch.cat((inv_pred, demo_embed[:, :-1]), dim=2)
-                inv_pred                 = F.normalize(inv_pred, dim=2) # maybe better to normalize here
-            mu_inv, scale_inv, logit_inv = self._action_dist(inv_pred)
-            inv_distribution       = DiscreteMixLogistic(mu_inv, scale_inv, logit_inv)
-            inv_prob               = rearrange(- inv_distribution.log_prob(actions), 'B n_mix act_dim -> B (n_mix act_dim)')
-            out['inv_prob_%s'%i]   = inv_prob #torch.mean(inv_prob, dim=-1)
-
         return out
 
     def forward(
@@ -520,21 +426,14 @@ class VideoImitation(nn.Module):
         eval=False,
         images_cp=None,
         context_cp=None,
-        multi_layer_actions=False,
         actions=None,
         ):
         B, obs_T, _, height, width = images.shape
         demo_T = context.shape[1]
         if not eval:
             assert images_cp is not None, 'Must pass in augmented version of images'
-        # if eval:
-        #     return self.fast_eval(images, context, ret_dist)
         embed_out = self._embed(images, context)
-        if multi_layer_actions:
-            # New(0610)
-            out = self.calculate_action_losses(actions, embed_out)
-        else:   # packed inside the get action function above
-            out = self.get_action(embed_out=embed_out, ret_dist=ret_dist)
+        out = self.get_action(embed_out=embed_out, ret_dist=ret_dist, states=states)
 
         if eval:
             return out # NOTE: early return here to do less computation during test time
@@ -551,8 +450,7 @@ class VideoImitation(nn.Module):
         for k, v in simclr_out_dict.items():
             assert 'simclr' in k
             out[k] = v
-        if multi_layer_actions:
-            return out
+
         # run inverse model
         demo_embed, img_embed        = out['demo_embed'], embed_out['img_embed'] # both are (B ob_T d)
         inv_in                       = torch.cat((img_embed[:,:-1], img_embed[:,1:]), 2)  # B, T_im-1, d * 2
@@ -613,7 +511,7 @@ class VideoImitation(nn.Module):
         print("Re-intialized a total of %s parameters in action MLP layers" % count)
 
     def skip_for_eval(self):
-        """ skip module inferences for evaluation"""
+        """ skip module inferences during evaluation"""
         self._byol = None
         self._simclr = None
         self._inv_model = None

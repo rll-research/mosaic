@@ -1,4 +1,3 @@
-# different SUITE for multiTask!!
 SUITE=/home/mandi/mosaic_multitask_dataset
 export CUDA_VISIBLE_DEVICES=2,3,4,5,6,7
 WORKERS=20
@@ -96,14 +95,14 @@ per_task=100
 
 TASK_name=pick_place  ## NOTE different size
 N_tasks=16
-NUM=1600
-for ROBOT in panda sawyer
+NUM=16 #00
+for ROBOT in panda # sawyer
 do 
 taskset -c ${CPUS} python ${SCRIPT} ${SUITE}/${TASK_name}/${ROBOT}_${TASK_name} \
         -tsk ${TASK_name} -ro ${ROBOT} --n_tasks ${N_tasks}  --n_env ${N_env} \
         --N ${NUM} --per_task_group ${per_task} \
         --num_workers ${WORKERS} --collect_cam \
-        --heights 200 --widths 360 \
+        --heights 100 --widths 180 \
         --overwrite # danger!!
 done 
 

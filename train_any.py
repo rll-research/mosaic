@@ -1,33 +1,19 @@
 import os
 import json 
-import yaml
 import copy
 import torch
 import hydra
-import random 
-import argparse
-import datetime
-import pickle as pkl
-import numpy as np
 import torch.nn as nn
 from os.path import join
-import torch.nn.functional as F
-# import matplotlib.pyplot as plt
-from multiprocessing import cpu_count
-from torch.utils.data import DataLoader
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 from mosaic.utils.lr_scheduler import build_scheduler
-from einops import rearrange, reduce, repeat, parse_shape
-from mosaic.models.discrete_logistic import DiscreteMixLogistic
-from collections import defaultdict, OrderedDict
-from hydra.utils import instantiate
-from mosaic.datasets.multi_task_datasets import BatchMultiTaskSampler, DIYBatchSampler, collate_by_task # need for val. loader
+from collections import defaultdict 
 torch.autograd.set_detect_anomaly(True)
 import learn2learn as l2l
 from train_utils import * 
 
 class Trainer:
-    def __init__(self, description="Default model trainer", allow_val_grad=False, hydra_cfg=None):
+    def __init__(self, allow_val_grad=False, hydra_cfg=None):
         assert hydra_cfg is not None, "Need to start with hydra-enabled yaml file!"
         self.config = hydra_cfg
         self.train_cfg = hydra_cfg.train_cfg
@@ -38,25 +24,23 @@ class Trainer:
         self._allow_val_grad = allow_val_grad 
         # set of file saving
         assert os.path.exists(self.config.save_path), "Warning! Save path {} doesn't exist".format(self.config.save_path)
-        if '/shared' in self.config.save_path:
-            print("Warning! saving data to /shared folder \n")
         assert self.config.exp_name != -1, 'Specify an experiment name for log data!'
 
         append = "-Batch{}".format(int(self.config.bsize)) 
-        if hydra_cfg.policy._target_ == 'mosaic.models.mt_rep.VideoImitation':
+        if 'mosaic' in hydra_cfg.policy._target_:
             append = "-Batch{}-{}gpu-Attn{}ly{}-Act{}ly{}mix{}".format(
                 int(self.config.bsize), int(torch.cuda.device_count()),
                 int(self.config.policy.attn_cfg.n_attn_layers), int(self.config.policy.attn_cfg.attn_ff),
                 int(self.config.policy.action_cfg.n_layers), int(self.config.policy.action_cfg.out_dim),
                 int(self.config.policy.action_cfg.n_mixtures))
-            #print(self.config.policy)
+
             if self.config.policy.concat_demo_head: 
                 append += "-headCat"
             elif self.config.policy.concat_demo_act:
                 append += "-actCat"
             else:
                 append += "-noCat"
-            if self.train_cfg.rep_loss_muls.get('simclr_pre', 0) or self.train_cfg.rep_loss_muls.get('simclr_pos', 0) or self.train_cfg.rep_loss_muls.get('simclr_intm', 0):
+            if 'mosaic' in hydra_cfg.policy._target_:
                 append += "-simclr{}x{}".format(int(self.config.policy.simclr_config.compressor_dim), int(self.config.policy.simclr_config.hidden_dim))
             
         self.config.exp_name += append
@@ -109,11 +93,7 @@ class Trainer:
                 which sums to {epochs * len(self._train_loader)} total train steps, \
                 validation loader has length {len(self._val_loader)}")
         for e in range(epochs):
-            frac = e / epochs
-            # if self.config.use_contrast:
-            #     mod = model.module if isinstance(model, nn.DataParallel) else model
-            #     mod.momentum_update(frac)
-
+            frac = e / epochs  
             for inputs in self._train_loader:
 
                 if self._step % save_freq == 0: # save model AND stats
@@ -147,8 +127,7 @@ class Trainer:
                     
                     if self._step % print_freq == 0:
                         print('Training epoch {1}/{2}, step {0}: \t '.format(self._step, e, epochs))
-                        print(train_print)
-                        
+                        print(train_print) 
 
                 if self._step % val_freq == 0:
                     # exhaust all data in val loader and take avg loss
@@ -184,11 +163,10 @@ class Trainer:
                 # update target params
                 mod = model.module if isinstance(model, nn.DataParallel) else model
                 if self.config.target_update_freq > -1:
+                    mod.momentum_update(frac)
                     if self._step % self.config.target_update_freq == 0:
                         mod.soft_param_update()
-
-
-
+  
         ## when all epochs are done, save model one last time
         self.save_checkpoint(model, optimizer, weights_fn, save_fn)
 
@@ -229,15 +207,9 @@ class Trainer:
             optim_weights, cfg.lr, weight_decay=cfg.get('weight_decay', 0))
         return optimizer, build_scheduler(optimizer, cfg.get('lr_schedule', {}))
 
-    def _step_optim(self, loss, step, optimizer):
-        loss.backward()
-        optimizer.step()
-
-    def _zero_grad(self, optimizer):
-        optimizer.zero_grad()
 
     def _loss_to_scalar(self, loss):
-        """New(0511): cut down precision here just for logging purpose"""
+        """For more readable logging"""
         x = loss.item()
         return float("{:.3f}".format(x))
 
@@ -252,17 +224,11 @@ class Trainer:
         return self._step % self._img_log_freq == 0
 
 class Workspace(object):
-    """
-    Initializes the action model;
-    defines how to caculate losses based on the model's output;
-    make them the output of train function function;
-    provide to the Trainer class above
-    """
+    """ Initializes the policy model and prepare for Trainer.train() """
     def __init__(self, cfg):
         self.trainer = Trainer(allow_val_grad=False, hydra_cfg=cfg)
         print("Finished initializing trainer")
         config = self.trainer.config
-        train_cfg = config.train_cfg
         resume = config.get('resume', False)
         self.action_model = hydra.utils.instantiate(config.policy)
         config.use_daml = 'DAMLNetwork' in cfg.policy._target_
@@ -274,20 +240,13 @@ class Workspace(object):
                 first_order=config['policy']['first_order'],
                 allow_unused=True)
 
-
         print("Action model initialized to: {}".format(config.policy._target_))
         if resume:
-            rpath = os.path.join('/home/{}/one_shot_transformers/baseline_data'.format(USER), config.resume_path)
-            if not os.path.exists(rpath): # on undergrad servers
-                rpath = os.path.join('/home/{}/osil'.format(USER), config.resume_path)
-            if not os.path.exists(rpath):
-                rpath = os.path.join('/shared/{}/bline_osil'.format(USER), config.resume_path)
-            if not os.path.exists(rpath):
-                rpath = join('/home/{}/2021/NeurIPS/one_shot_transformers/log_data'.format(USER), config.resume_path)
+            rpath = join(cfg.save_path, cfg.resume_path) 
             assert os.path.exists(rpath), "Can't seem to find {} anywhere".format(config.resume_path)
             print('load model from ...%s' % rpath)
-
             self.action_model.load_state_dict(torch.load(rpath, map_location=torch.device('cpu')))
+        
         self.config = config
         self.train_cfg = config.train_cfg
 
@@ -302,7 +261,6 @@ class Workspace(object):
 
 
     def run(self):
-        mod = self.action_model.module if isinstance(self.action_model, nn.DataParallel) else self.action_model
         self.trainer.train(self.action_model)
         print("Done training")
 
@@ -310,8 +268,7 @@ class Workspace(object):
 @hydra.main(
     config_path="experiments", 
     config_name="config.yaml")
-def main(cfg):
-     
+def main(cfg): 
     from train_any import Workspace as W
     all_tasks_cfgs = [cfg.tasks_cfgs.nut_assembly, cfg.tasks_cfgs.door, cfg.tasks_cfgs.drawer, cfg.tasks_cfgs.button, cfg.tasks_cfgs.new_pick_place, cfg.tasks_cfgs.stack_block, cfg.tasks_cfgs.basketball]
     
@@ -332,9 +289,8 @@ def main(cfg):
             tsk.n_per_task = cfg.set_same_n
         cfg.bsize = sum( [tsk.n_tasks * cfg.set_same_n for tsk in cfg.tasks] )
         cfg.vsize = cfg.bsize
-        print(f'Set n_per_task of all tasks to {cfg.set_same_n}, new train/val batch sizes: {cfg.train_cfg.batch_size}/{cfg.train_cfg.val_size}')
+        print(f'To construct a training batch, set n_per_task of all tasks to {cfg.set_same_n}, new train/val batch sizes: {cfg.train_cfg.batch_size}/{cfg.train_cfg.val_size}')
         
-    
     if cfg.limit_num_traj > -1:
         print('Only using {} trajectory for each sub-task'.format(cfg.limit_num_traj))
         for tsk in cfg.tasks:

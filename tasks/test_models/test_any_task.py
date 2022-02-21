@@ -2,7 +2,6 @@
 Evaluate each task for the same number of --eval_each_task times. 
 """
 from robosuite import load_controller_config
-from robosuite.utils.transform_utils import quat2axisangle
 from robosuite_env.controllers.expert_basketball import \
     get_expert_trajectory as basketball_expert
 from robosuite_env.controllers.expert_nut_assembly import \
@@ -24,7 +23,6 @@ import copy
 import os
 from os.path import join 
 from collections import defaultdict
-from pyquaternion import Quaternion
 import torch
 from mosaic.datasets import Trajectory
 import numpy as np
@@ -36,24 +34,17 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import json
 import wandb 
-import cv2
 from collections import OrderedDict 
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from torchvision import transforms
-from torchvision.transforms import RandomAffine, ToTensor, Normalize
+from torchvision.transforms import ToTensor, Normalize
 from torchvision.transforms import functional as TvF
 from torchvision.transforms.functional import resized_crop
-from torchvision.transforms import RandomAffine, ToTensor, Normalize, \
-    RandomGrayscale, ColorJitter, RandomApply, RandomHorizontalFlip, GaussianBlur, RandomResizedCrop
-import matplotlib.pyplot as plt
 import learn2learn as l2l
-import wandb 
 
 set_start_method('forkserver', force=True)
-USER = 'mandi'
-MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape((3,1,1))
-STD = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape((3,1,1))
+LOG_PATH='/home/mandi/mosaic/log_data'
 
 TASK_MAP = {
     'basketball': {
@@ -61,7 +52,7 @@ TASK_MAP = {
         'env_fn':   basketball_expert,
         'eval_fn':  basketball_eval,
         'agent-teacher': ('PandaBasketball', 'SawyerBasketball'),
-        'render_hw': (100, 180), # new bask_hard is 150 270!
+        'render_hw': (100, 180),  
         },
     'nut_assembly':  {
         'num_variations':   9, 
@@ -75,7 +66,7 @@ TASK_MAP = {
         'env_fn':   place_expert,
         'eval_fn':  pick_place_eval,
         'agent-teacher': ('PandaPickPlaceDistractor', 'SawyerPickPlaceDistractor'),
-        'render_hw': (100, 180), #(150, 270)
+        'render_hw': (100, 180),  
         },
     'pick_place': {
         'num_variations':   16, 
@@ -212,7 +203,7 @@ def rollout_imitation(model, config, ctr,
     if gpu_id == -1:
         gpu_id = int(ctr % torch.cuda.device_count())
     model = model.cuda(gpu_id)
-    dataset_tar = config.train_cfg.dataset.get('_target_', None)
+
     img_formatter = build_tvf_formatter(config, env_name)
      
     T_context = config.train_cfg.dataset.get('T_context', None)
@@ -273,14 +264,10 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     try_path = args.model
-    if 'data' not in args.model and 'mosaic' not in args.model:
+    if 'log' not in args.model and 'mosaic' not in args.model:
         print("Appending dir to given exp_name: ", args.model)
-        try_path = join(f'/home/{USER}/mosaic/log_data', args.model)
-        if not os.path.exists(try_path):
-            try_path = join(f'/shared/{USER}/mosaic', args.model)
-        if not os.path.exists(try_path):
-            try_path = join(f'/home/{USER}/mosaic/baseline_data', args.model)
-        assert os.path.exists(try_path), "Cannot find appending dir anywhere"
+        try_path = join(LOG_PATH, args.model)
+        assert os.path.exists(try_path), f"Cannot find {try_path} anywhere"
     if 'model_save' not in args.model:
         print("Appending saved step {}".format(args.saved_step))
         try_path = join(try_path, 'model_save-{}.pt'.format(args.saved_step))
@@ -309,8 +296,7 @@ if __name__ == '__main__':
     config_path = os.path.expanduser(args.config) if args.config else os.path.join(os.path.dirname(model_path), 'config.yaml')
  
     config = OmegaConf.load(config_path)
-    print('Multi-task dataset, tasks used: ', config.tasks )
-     
+    print('Multi-task dataset, tasks used: ', config.tasks ) 
 
     model = hydra.utils.instantiate(config.policy)
     
@@ -332,8 +318,7 @@ if __name__ == '__main__':
     if args.use_h != -1 and args.use_w != -1:
         print(f"Reset to non-default render sizes {args.use_h}-by-{args.use_w}")
         heights, widths = args.use_h, args.use_w 
-    #if args.env == 'pick_place':
-    #    assert args.use_h == 150 or args.use_h == 200, 'PickPlace needs larger rendering'
+    
     print("Renderer is using size {} \n".format((heights, widths)))
     
     

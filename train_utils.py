@@ -15,16 +15,12 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from multiprocessing import cpu_count
 from torch.utils.data import DataLoader
-from omegaconf import DictConfig, OmegaConf
-from torch.cuda.amp import autocast, GradScaler
-from einops.layers.torch import Rearrange, Reduce
-from mosaic.utils.lr_scheduler import build_scheduler
 from einops import rearrange, reduce, repeat, parse_shape
 from mosaic.models.discrete_logistic import DiscreteMixLogistic
 from collections import defaultdict, OrderedDict
 from hydra.utils import instantiate
-from mosaic.datasets.multi_task_datasets import BatchMultiTaskSampler, DIYBatchSampler, collate_by_task # need for val. loader
-from torch.utils.data._utils.collate import default_collate
+from mosaic.datasets.multi_task_datasets import DIYBatchSampler, collate_by_task # need for val. loader
+
 torch.autograd.set_detect_anomaly(True)
 import learn2learn as l2l
 # for visualization
@@ -36,22 +32,18 @@ def loss_to_scalar(loss):
     return float("{:.5f}".format(x))
 
 def make_data_loaders(config, dataset_cfg):
-    """
-    use yaml  to return train and val dataloaders
-    """
+    """ Use .yaml cfg to create both train and val dataloaders """
     assert '_target_' in dataset_cfg.keys(), "Let's use hydra-config from now on. "
     print("Initializing {} with hydra config. \n".format(dataset_cfg._target_))
-    #if dataset_cfg.get('agent_dir', None):
-    #print("Agent file dirs: ", dataset_cfg.root_dir)
+
     dataset_cfg.mode = 'train'
     dataset = instantiate(dataset_cfg)
-    samplerClass = DIYBatchSampler if config.samplers.use_diy else BatchMultiTaskSampler
+    samplerClass = DIYBatchSampler 
     train_sampler = samplerClass(
             task_to_idx=dataset.task_to_idx,
             subtask_to_idx=dataset.subtask_to_idx,
             tasks_spec=dataset_cfg.tasks_spec,
             sampler_spec=config.samplers)
-    #print("Dataloader has batch size {} \n".format(.batch_size))
     train_loader = DataLoader(
         dataset,
         batch_sampler=train_sampler,
@@ -77,7 +69,6 @@ def make_data_loaders(config, dataset_cfg):
         worker_init_fn=lambda w: np.random.seed(np.random.randint(2 ** 29) + w),
         collate_fn=collate_by_task
         )
-    #print("Validation loader has {} total samples".format(len(val_loader)))
     return train_loader, val_loader
 
 def collect_stats(step, task_losses, raw_stats, prefix='train'):
@@ -154,8 +145,6 @@ def calculate_maml_loss(config, device, meta_model, model_inputs):
         mu, sigma_inv, alpha = out['action_dist']
         action_distribution = DiscreteMixLogistic(mu[:-1], sigma_inv[:-1], alpha[:-1])
         l_bc = -torch.mean(action_distribution.log_prob(actions[task]))[None]
-        #validation_loss = l_bc + l_aux
-        #error += validation_loss / states.shape[0]
         bc_loss.append(l_bc)
         aux_loss.append(l_aux)
 
@@ -164,7 +153,6 @@ def calculate_maml_loss(config, device, meta_model, model_inputs):
 def calculate_task_loss(config, train_cfg, device, model, task_inputs):
     """Assumes inputs are collated by task names already, organize things properly before feeding into the model s.t.
         for each batch input, the model does only one forward pass."""
-    all_loss, all_stats = dict(), dict()
 
     model_inputs = defaultdict(list)
     task_to_idx = dict()
@@ -201,7 +189,6 @@ def calculate_task_loss(config, train_cfg, device, model, task_inputs):
                 images=model_inputs['images'], images_cp=model_inputs['images_cp'], 
                 context=model_inputs['demo'],  context_cp=model_inputs['demo_cp'],
                 states=model_inputs['states'], ret_dist=False,
-                multi_layer_actions=False,
                 actions=model_inputs['actions']) 
         else: # other baselines 
             out = model(

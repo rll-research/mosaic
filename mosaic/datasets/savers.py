@@ -1,7 +1,6 @@
 import cv2
 import copy
 import numpy as np
-from collections import OrderedDict
 
 try:
     from mujoco_py import load_model_from_xml, MjSim, MjRenderContextOffscreen

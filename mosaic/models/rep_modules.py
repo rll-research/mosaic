@@ -1,5 +1,4 @@
 import torch
-import hydra 
 import torch.nn as nn
 import numpy as np
 from torch import einsum
@@ -230,9 +229,10 @@ class BYOLModule(nn.Module):
 
 class ContrastiveModule(nn.Module):
     """
-    New(0511): add a simplified version of CURL: if k=0 it only does instance-contrast, 
-    else, do similar shuffling as in BYOL and contrast against other temporally apart frames within the batch.
-    For simplicity just use one set of MLP for projector and predictor, since the W matrices are kept separate
+    NOTE: do compare instance-level constrastive loss, set k=0
+    Random shuffle and contrast against other temporally apart frames within the batch.
+    Use one set of MLPs as projector and predictor for any convolution features,
+    and keep W matrices separate across input features from different attention layers
     """
     def __init__(
         self,
@@ -247,11 +247,9 @@ class ContrastiveModule(nn.Module):
         compressor_dim=128,
         temporal=False,
         hidden_dim=0,
-        share_W=False,
         mul_pre=0,
         mul_pos=0,
         mul_intm=0,
-        loss_twice=False,
         fix_step=-1,
         ):
         super().__init__()
@@ -289,47 +287,26 @@ class ContrastiveModule(nn.Module):
         d_f                =   compressor_dim
         self._pre_attn_W   =   nn.Parameter(torch.rand(d_f, d_f))
         self._post_attn_W  =   nn.Parameter(torch.rand(d_f, d_f))
-        self.share_W       =   share_W
         self._intm_attn_W  =   nn.Parameter(torch.rand(d_f, d_f)) # New(0512)
         self.tau           =   tau
         self._demo_T       =   demo_T
         self.temporal      =   temporal
-        self.loss_twice    = loss_twice
         self.fix_step      = fix_step
 
     def forward(self, embed_out, embed_out_target):
-        """
-        New(0512): temporal contrastive on outputs everywhere
-        """
         sim_out = OrderedDict()
         self.calculate_loss(embed_out, embed_out_target, sim_out, in_key='img_features', out_key='simclr_pre')
         self.calculate_loss(embed_out, embed_out_target, sim_out, in_key='attn_features', out_key='simclr_post')
         self.calculate_loss(embed_out, embed_out_target, sim_out, in_key='attn_out_0', out_key='simclr_intm')
-        if self.loss_twice:
-            for (in_key, out_key) in zip(['img_features', 'attn_features', 'attn_out_0'], ['simclr_pre', 'simclr_post', 'simclr_intm']):
-                first_time = sim_out[out_key]
-                self.calculate_loss(embed_out, embed_out_target, sim_out, in_key=in_key, out_key=out_key)
-                new_loss = sim_out[out_key]
-                sim_out[out_key] = first_time + new_loss
-
         return sim_out
 
     def calculate_loss(self, embed_out, embed_out_target, sim_out=None, in_key='img_features', out_key='pre'):
-        # if pre_attn:
-        #     img_anc = embed_out['img_features']
-        # else:
-        #     img_anc = embed_out['attn_features']
         img_anc     = embed_out.get(in_key, None)
         assert img_anc is not None, 'output is missing: '+str(in_key)
         compressor  = self.frame_compressor
         z_a         = compressor(img_anc) # BT, D
         if self.temporal:
             z_a     = self.predictor(z_a)
-        # now get target
-        # if pre_attn:
-        #     img_pos = embed_out_target['img_features'] # this should already calculate on aug(imgs)
-        # else:
-        #     img_pos = embed_out_target['attn_features']
         img_pos     = embed_out_target[in_key]
         assert img_pos.shape == img_anc.shape
         if self.temporal:
@@ -349,15 +326,14 @@ class ContrastiveModule(nn.Module):
         z_pos = compressor_tar(img_pos).detach()
 
         # compute (B*T,B*T) matrix z_a (W z_pos.T)
-        # - to compute loss use multiclass cross entropy with identity matrix for labels
-        # W_frame = self._pre_attn_W  if pre_attn else self._post_attn_W
+        # use multiclass cross entropy with identity matrix for labels
         W_frame = self._pre_attn_W
-        if not self.share_W and 'pos' in out_key:
+        if 'pos' in out_key:
             W_frame = self._post_attn_W
-        elif not self.share_W and 'intm' in out_key:
+        elif 'intm' in out_key:
             W_frame = self._intm_attn_W
         logits = einsum('ad,dd,bd->ab', z_a, W_frame, z_pos)
-        # assert logits.shape[0] > img_anc.shape[0], logits.shape # B*T > B
+       
         logits = logits - reduce(logits, 'a b -> a 1', 'max')
         labels = torch.arange(logits.shape[0]).long().to(logits.get_device())
 
