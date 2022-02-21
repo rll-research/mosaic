@@ -19,18 +19,7 @@ def make_target(mlp):
     return target
 
 class BYOLModule(nn.Module):
-    """
-    New(0509): add an option to share projector and predictor for pre&post attention features
-            add another set to draw together mean-demonstration embeddings
-    New(0506): assume the "target_out" embeddings come from the frozen target encoder + a stronger image augmentation
-        Use this one module to try different video-representation learning loss: 
-       First try BYOL: it's temporally-constrative + less concern about where to get negative samples
-       Make this agnostic to teacher/student length: reshape before-hand, and
-       just take in a batch of video frames, sample 'clips' (for now just length=1)
-       If we want to do contrastive on _attended_ teacher/student videos, 
-       either pass them in separate batches, or cut & concat with the same length
-       default use only project dimension and hidden dimension for both projector and predictor
-       """
+    """ BYOL: temporally-constrative without negative samples """
     def __init__(
         self,
         embedder, 
@@ -70,7 +59,7 @@ class BYOLModule(nn.Module):
                 nn.Linear(img_feat_dim, project_dim),
                 nn.LayerNorm(project_dim),
                 )
-        if share_mlp: # New(0518): use layernorm and hidden dim for BYOL 
+        if share_mlp: # use layernorm and hidden dim for BYOL 
             self.pre_attn_proj      = nn.Sequential(
                 Rearrange('B T d H W -> (B T) d H W'),
                 nn.BatchNorm2d(img_conv_dim), nn.ReLU(inplace=True),
@@ -101,7 +90,6 @@ class BYOLModule(nn.Module):
                 )
          
         self.post_attn_proj_tar = make_target(self.post_attn_proj)
-        # New(0509)
         self.share_mlp = share_mlp
         self.demo_proj = demo_proj
         if demo_proj:
@@ -132,7 +120,6 @@ class BYOLModule(nn.Module):
                 nn.Linear(project_dim, hidden_dim), nn.ReLU(inplace=True),
                 nn.Linear(hidden_dim, project_dim), 
                 nn.LayerNorm(project_dim))
-            print("New(0519): Make BYOL MLPs more like SimCLR")
 
         self.draw_apart = draw_apart
         self.m_base             = 0.996 
@@ -153,8 +140,7 @@ class BYOLModule(nn.Module):
         feats, feats_aug = [out['attn_features'] for out in [embed_out, embed_out_target]]
         byol_out['attn_byol'] = \
             self.calculate_loss(feats, feats_aug, predict, project, target_project)
-        
-        # New(0512)
+         
         feats, feats_aug = [out['attn_out_0'] for out in [embed_out, embed_out_target]]
         byol_out['intm_byol'] = \
             self.calculate_loss(feats, feats_aug, predict, project, target_project)
@@ -229,7 +215,7 @@ class BYOLModule(nn.Module):
 
 class ContrastiveModule(nn.Module):
     """
-    NOTE: do compare instance-level constrastive loss, set k=0
+    NOTE: To compare instance-level constrastive loss, set fix_step=0
     Random shuffle and contrast against other temporally apart frames within the batch.
     Use one set of MLPs as projector and predictor for any convolution features,
     and keep W matrices separate across input features from different attention layers
@@ -287,7 +273,7 @@ class ContrastiveModule(nn.Module):
         d_f                =   compressor_dim
         self._pre_attn_W   =   nn.Parameter(torch.rand(d_f, d_f))
         self._post_attn_W  =   nn.Parameter(torch.rand(d_f, d_f))
-        self._intm_attn_W  =   nn.Parameter(torch.rand(d_f, d_f)) # New(0512)
+        self._intm_attn_W  =   nn.Parameter(torch.rand(d_f, d_f))  
         self.tau           =   tau
         self._demo_T       =   demo_T
         self.temporal      =   temporal

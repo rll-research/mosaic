@@ -160,21 +160,16 @@ class _TransformerFeatures(nn.Module):
         flag, drop_dim = img_cfg.network_flag, img_cfg.drop_dim
         self.network_flag = flag
 
-        if flag == 0:
-            self._img_encoder = get_model('resnet')(
-                output_raw=True, drop_dim=drop_dim, use_resnet18=True, pretrained=img_cfg.pretrained)
-            if drop_dim == 2:
-                conv_feature_dim = 512
-            elif drop_dim == 3:
-                conv_feature_dim = 256
-            else:
-                raise NotImplementedError
+        assert flag == 0 , "flag number %s not supported!" % flag
+        self._img_encoder = get_model('resnet')(
+            output_raw=True, drop_dim=drop_dim, use_resnet18=True, pretrained=img_cfg.pretrained)
+        if drop_dim == 2:
+            conv_feature_dim = 512
+        elif drop_dim == 3:
+            conv_feature_dim = 256
         else:
-            assert flag in NETWORK_MAP, "flag number %s not supported!" % s
-            encoder_class = NETWORK_MAP.get(flag)
-            self._img_encoder = encoder_class(img_cfg.out_feature, img_cfg.kernel)
-            conv_feature_dim = img_cfg.out_feature
-
+            raise NotImplementedError
+        
         self._attn_layers = _StackedAttnLayers(
             in_dim=conv_feature_dim, out_dim=conv_feature_dim, n_layers=n_attn_layers,
             demo_ff_dim=attn_ff, obs_ff_dim=attn_ff, dropout=dropout,
@@ -184,8 +179,8 @@ class _TransformerFeatures(nn.Module):
         self._pe = TemporalPositionalEncoding(conv_feature_dim, dropout) if pos_enc else None
         self.demo_out = demo_out
         in_dim = conv_feature_dim * dim_H * dim_W
-        print("New(0506): Not using spatial embedding! Linear embedder has higher input dim: {}x{}x{}={} ".format(
-                conv_feature_dim, dim_H, dim_W, in_dim))
+        print("Linear embedder has input dim: {}x{}x{}={} ".format(
+            conv_feature_dim, dim_H, dim_W, in_dim))
 
         self._linear_embed = nn.Sequential(
             nn.Linear(in_dim, embed_hidden),

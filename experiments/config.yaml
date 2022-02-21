@@ -24,6 +24,7 @@ rep_muls:
   simclr_post:        ${simclr.mul_pos}
   simclr_intm:        ${simclr.mul_intm}
 
+wandb_log: False 
 train_cfg:
   batch_size:           ${bsize}
   val_size:             ${vsize}
@@ -39,6 +40,7 @@ train_cfg:
   rep_loss_muls:        ${rep_muls}
   dataset:              ${dataset_cfg}
   sampler:              ${samplers}
+  target_update_freq:   5  # used for soft parameter update
 
 # tasks related
 tasks:       ???
@@ -53,7 +55,7 @@ defaults:
 EXPERT_DATA:    '/home/mandi/mosaic_multitask_dataset' 
 
 # dataset/loader/samplers
-loader_workers:     20 
+loader_workers:     10 
 samplers:        
   batch_size:         ${bsize}
   drop_last:          False
@@ -93,8 +95,7 @@ augs:
   use_affine:        False  
   rand_trans:        0.1
 
-# contrastive related
-target_update_freq: 5
+
 simclr:
   demo_T:           ${train_cfg.dataset.demo_T}
   obs_T:            ${train_cfg.dataset.obs_T} 
@@ -208,7 +209,7 @@ lstm:
   pred_point:       True
   transformer_feat: False
 
-use_daml: ??? 
+use_daml: False
 daml:
   _target_: mosaic.models.baselines.DAMLNetwork
   n_final_convs: 'resnet'

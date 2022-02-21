@@ -11,6 +11,7 @@ from collections import defaultdict
 torch.autograd.set_detect_anomaly(True)
 import learn2learn as l2l
 from train_utils import * 
+import wandb 
 
 class Trainer:
     def __init__(self, allow_val_grad=False, hydra_cfg=None):
@@ -50,6 +51,14 @@ class Trainer:
         self._save_fname = join(save_dir, 'model_save')
         self.save_dir = save_dir
         self._step = None
+        if self.config.wandb_log:
+            config_keys = ['train_cfg', 'tasks', 'samplers', 'dataset_cfg', 'policy']
+            # for k in config_keys:
+            #     print(k, self.config.get(k))
+            #     print(k, dict(self.config.get(k)))
+            #     print('-'*20)
+            wandb_config = {k: self.config.get(k) for k in config_keys}
+            run = wandb.init(project='mosaic', name=self.config.exp_name, config=wandb_config)
  
     def train(self, model, weights_fn=None, save_fn=None, optim_weights=None): 
         self._train_loader, self._val_loader = make_data_loaders(self.config, self.train_cfg.dataset)
@@ -124,6 +133,13 @@ class Trainer:
                 # calculate train iter stats
                 if self._step % log_freq == 0:
                     train_print = collect_stats(self._step, task_losses, raw_stats, prefix='train')   
+                    if self.config.wandb_log:
+                        tolog = {'Train Step': self._step}
+                        for task_name, losses in task_losses.items():
+                            for loss_name, loss_val in losses.items():
+                                tolog[f'train/{loss_name}/{task_name}'] = loss_val
+                                tolog[f'train/{task_name}/{loss_name}'] = loss_val
+                        wandb.log(tolog)
                     
                     if self._step % print_freq == 0:
                         print('Training epoch {1}/{2}, step {0}: \t '.format(self._step, e, epochs))
@@ -135,10 +151,8 @@ class Trainer:
                     val_iter = iter(self._val_loader)
                     model = model.eval()
                     for val_inputs in val_iter:
-                        if self.config.use_daml: # allow grad!
-                            
+                        if self.config.use_daml: # allow grad! 
                             val_task_losses = calculate_task_loss(self.confg, self.train_cfg,  self._device, model, val_inputs)
-                            
                         else:
                             with torch.no_grad(): 
                                 val_task_losses = calculate_task_loss(self.config, self.train_cfg, self._device, model, val_inputs)
@@ -146,6 +160,13 @@ class Trainer:
                         for task, losses in val_task_losses.items():
                             for k, v in losses.items():
                                 all_val_losses[task][k].append(v)
+                    if self.config.wandb_log:
+                        tolog = {'Validation Step': self._step}
+                        for task_name, losses in val_task_losses.items():
+                            for loss_name, loss_val in losses.items():
+                                tolog[f'val/{loss_name}/{task_name}'] = loss_val
+                                tolog[f'val/{task_name}/{loss_name}'] = loss_val
+                        wandb.log(tolog)
                     # take average across all batches in the val loader 
                     avg_losses = dict()
                     for task, losses in all_val_losses.items():
@@ -162,9 +183,9 @@ class Trainer:
                 self._step += 1
                 # update target params
                 mod = model.module if isinstance(model, nn.DataParallel) else model
-                if self.config.target_update_freq > -1:
+                if self.train_cfg.target_update_freq > -1:
                     mod.momentum_update(frac)
-                    if self._step % self.config.target_update_freq == 0:
+                    if self._step % self.train_cfg.target_update_freq == 0:
                         mod.soft_param_update()
   
         ## when all epochs are done, save model one last time
