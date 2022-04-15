@@ -1,5 +1,5 @@
-# Towards More Generalizable One-Shot Visual Imitation Learning
-ArXiv: https://arxiv.org/abs/2110.13423
+# MOSAIC 
+Code for Paper: Towards More Generalizable One-ShotVisual Imitation Learning, ArXiv: https://arxiv.org/abs/2110.13423
 
 ## Installation
 Note that the below instructions are mainly tested on Linux x86_64 with NVIDIA GPUs (`Driver Version: 465.19.01 CUDA Version: 11.3`) 
@@ -81,3 +81,4 @@ TASK_str=stack_block
 MODEL=1Task-StackBlock-Batch30-1gpu-Attn2ly128-Act2ly64mix2-headCat-simclr128x256
 python tasks/test_models/test_one_model.py $MODEL --last_few 1 --eval_tasks ${TASK_str} --num_workers 3
 ```
+
