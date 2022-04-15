@@ -1,0 +1,85 @@
+<mujoco model="hammerblock">
+    <compiler angle="radian" inertiafromgeom="auto" inertiagrouprange="4 5"/>
+    <asset>
+        <texture name="T_hmr_met" type="cube" file="textures/plaster1.png"/>
+        <texture name="T_hmr_wood" type="cube" file="textures/navy_blue.png"/>
+
+        <material name="hmr_col" texture="T_hmr_wood" rgba=".65 .65 .65 1" shininess="1" reflectance=".7"
+                  specular=".5"/>
+        <material name="hmr_red" rgba=".35 0.1 0 1" shininess="1" reflectance=".7" specular=".5"/>
+        <material name="hmr_metal" texture="T_hmr_met" rgba=".65 .65 .65 1" shininess="1" reflectance=".7"
+                  specular=".5"/>
+        <material name="hmr_wood" texture="T_hmr_wood" shininess="1" reflectance=".7" specular=".5"/>
+    </asset>
+    <default>
+
+        <default class="hmr_base">
+            <joint armature="0.001" damping="2" limited="true"/>
+            <geom conaffinity="0" contype="0" group="1" type="mesh"/>
+            <position ctrllimited="true" ctrlrange="0 1.57"/>
+            <default class="hmr_col">
+                <geom conaffinity="1" condim="3" contype="1" group="0" material="hmr_col" solimp="0.99 0.99 0.01"
+                      solref="0.01 1"/>
+            </default>
+        </default>
+    </default>
+
+    <worldbody>
+        <body>
+            <body name="object">
+                <body name="case1" pos="0 0 0">
+                    <geom class="hmr_col" pos="0 0 0.125" size="0.08 0.08 0.035" type="box" density="5000"/>
+                    <geom class="hmr_col" pos="0.038 0 0.08" size="0.042 0.08 0.01" type="box" density="5000"/>
+                    <geom class="hmr_col" pos="-0.038 0 0.08" size="0.042 0.08 0.01" type="box" density="5000"/>
+                    <geom class="hmr_col" pos="0 0 0.035" size="0.08 0.08 0.035" type="box" density="5000"/>
+                    <body name="button_link_1" pos="0 -0.186 0.08">
+                        <joint class="hmr_base" type="slide" axis="0 1 0" range="0 .05" name="slide_joint_1"
+                               damping="2"/>
+                        <geom class="hmr_col" euler="1.57 0 0" pos="0.0 0.082 0" size="0.03 0.03" type="cylinder"
+                              material="hmr_metal"/>
+                        <body name="button_pos_1" pos="0 0.042 0.0">
+                            <geom class="hmr_col" size="0.01" rgba="1 0 0 0" type="sphere" group="1"/>
+                        </body>
+                        <site name="goal1" size="0.01" rgba="1 0 0 1" pos="0 0.035 -0.005"/>
+
+                    </body>
+                </body>
+                <body name="case2" pos="0.122 0 0">
+                    <geom class="hmr_col" pos="0 0 0.125" size="0.08 0.08 0.035" type="box" density="5000"/>
+                    <geom class="hmr_col" pos="0.038 0 0.08" size="0.042 0.08 0.01" type="box" density="5000"/>
+                    <geom class="hmr_col" pos="-0.038 0 0.08" size="0.042 0.08 0.01" type="box" density="5000"/>
+                    <geom class="hmr_col" pos="0 0 0.035" size="0.08 0.08 0.035" type="box" density="5000"/>
+                    <body name="button_link_2" pos="0 -0.186 0.08">
+                        <joint class="hmr_base" type="slide" axis="0 1 0" range="0 .05" name="slide_joint_2"
+                               damping="2"/>
+                        <geom class="hmr_col" euler="1.57 0 0" pos="0.0 0.082 0" size="0.03 0.03" type="cylinder"
+                              material="hmr_metal"/>
+                        <body name="button_pos_2" pos="0 0.042 0.0">
+                            <geom class="hmr_col" size="0.01" rgba="1 0 0 0" type="sphere"  group="1"/>
+                        </body>
+                        <site name="goal2" size="0.01" rgba="1 0 0 1" pos="0 0.035 -0.005"/>
+                    </body>
+                </body>
+                <body name="case3" pos="-0.122 0 0">
+                    <geom class="hmr_col" pos="0 0 0.125" size="0.08 0.08 0.035" type="box" density="5000"/>
+                    <geom class="hmr_col" pos="0.038 0 0.08" size="0.042 0.08 0.01" type="box" density="5000"/>
+                    <geom class="hmr_col" pos="-0.038 0 0.08" size="0.042 0.08 0.01" type="box" density="5000"/>
+                    <geom class="hmr_col" pos="0 0 0.035" size="0.08 0.08 0.035" type="box" density="5000"/>
+                    <body name="button_link_3" pos="0 -0.186 0.08">
+                        <joint class="hmr_base" type="slide" axis="0 1 0" range="0 .05" name="slide_joint_3"
+                               damping="2"/>
+                        <geom class="hmr_col" euler="1.57 0 0" pos="0.0 0.082 0" size="0.03 0.03" type="cylinder"
+                              material="hmr_metal"/>
+                        <body name="button_pos_3" pos="0 0.042 0.0">
+                            <geom class="hmr_col" size="0.01" rgba="1 0 0 0" type="sphere" group="1"/>
+                        </body>
+                        <site name="goal3" size="0.01" rgba="1 0 0 1" pos="0 0.035 -0.005"/>
+                    </body>
+                </body>
+            </body>
+            <site rgba="0 0 0 0" size="0.0005" pos="0 0 -0.08" name="bottom_site"/>
+            <site rgba="0 0 0 0" size="0.0005" pos="0 0 0.65" name="top_site"/>
+            <site rgba="0 0 0 0" size="0.0005" pos="0.011 0.09 0" name="horizontal_radius_site"/>
+        </body>
+    </worldbody>
+</mujoco>
